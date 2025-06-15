@@ -93,6 +93,12 @@ function injectFABs() {
   summarizeFab.onclick = () => {
     const selectedText = window.getSelection().toString();
     if (!selectedText) return;
+    
+    // Show loading state
+    summarizeFab.disabled = true;
+    summarizeFab.innerHTML = '⏳';
+    summarizeFab.style.cursor = 'wait';
+    
     chrome.runtime.sendMessage({
       action: 'summarize',
       text: selectedText,
@@ -177,6 +183,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     request.action === 'updateSummary'
   ) {
     displaySummary(request.summary);
+    
+    // Reset summarize button state when we start getting responses
+    const summarizeFab = document.querySelector('.fab[title="Summarize selection"]');
+    if (summarizeFab && summarizeFab.disabled) {
+      summarizeFab.disabled = false;
+      summarizeFab.innerHTML = '✨';
+      summarizeFab.style.cursor = 'pointer';
+    }
   }
 });
 

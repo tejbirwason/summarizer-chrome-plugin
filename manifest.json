@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
-  "name": "Summarize & Draft (Claude)",
+  "name": "Summarize (o3) & Draft (Claude)",
   "version": "1.0",
-  "description": "Two floating emoji buttons: Summarize & Draft response using Claude API",
+  "description": "Two floating emoji buttons: Summarize with o3 & Draft responses with Claude",
   "permissions": ["activeTab", "scripting", "nativeMessaging"],
-  "host_permissions": ["https://api.anthropic.com/*", "<all_urls>"],
+  "host_permissions": ["https://api.anthropic.com/*", "https://api.openai.com/*", "<all_urls>"],
   "background": {
     "service_worker": "background.js"
   },

@@ -1,0 +1,28 @@
+{
+  "name": "summarizer-chrome-plugin",
+  "version": "1.0.0",
+  "description": "",
+  "main": "background.js",
+  "scripts": {
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tejbirwason/summarizer-chrome-plugin.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/tejbirwason/summarizer-chrome-plugin/issues"
+  },
+  "homepage": "https://github.com/tejbirwason/summarizer-chrome-plugin#readme",
+  "devDependencies": {
+    "@types/chrome": "^0.0.326",
+    "jest": "^30.0.0",
+    "jest-environment-jsdom": "^30.0.0"
+  }
+}

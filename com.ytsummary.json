@@ -1,7 +1,7 @@
 {
   "name": "com.ytsummary",
   "description": "YouTube Summary Host",
-  "path": "/Users/tejbirwason/playground/summarizer-chrome-plugin/yt-summary.py",
+  "path": "/Users/tjwason/summarizer-chrome-plugin/yt-summary.py",
   "type": "stdio",
-  "allowed_origins": ["chrome-extension://lnlhkihlapnpghncokpjofmoknmffigo/"]
+  "allowed_origins": ["chrome-extension://ebhjcabpoikcfhoadolmbcnpepbkmmec/"]
 }

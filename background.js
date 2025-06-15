@@ -1,10 +1,40 @@
 // background.js
 
-const ANTHROPIC_API_KEY = 'enter-your-key-here';
+// Try to load config.js
+try {
+  importScripts('config.js');
+} catch (e) {
+  console.warn('config.js not found. Using default values.');
+}
+
+// Load API keys from config.js
+let OPENAI_API_KEY = '';
+let ANTHROPIC_API_KEY = '';
+
+// Check if CONFIG is defined and has the required keys
+if (typeof CONFIG !== 'undefined') {
+  OPENAI_API_KEY = CONFIG.OPENAI_API_KEY || '';
+  ANTHROPIC_API_KEY = CONFIG.ANTHROPIC_API_KEY || '';
+} else {
+  console.error('CONFIG not found. Please create config.js from config.example.js');
+}
 
 async function getSummary(text, tab) {
   return new Promise(async (resolve) => {
     try {
+      // Check if API key is configured
+      if (!OPENAI_API_KEY || OPENAI_API_KEY === 'your-openai-api-key-here') {
+        const errorMsg = 'OpenAI API key not configured. Please create config.js from config.example.js and add your API key.';
+        console.error(errorMsg);
+        if (tab) {
+          chrome.tabs.sendMessage(tab.id, {
+            action: 'displaySummary',
+            summary: errorMsg
+          });
+        }
+        resolve(errorMsg);
+        return;
+      }
       // If we have a tab, ensure content.js is loaded (optional if always loaded)
       if (tab) {
         await chrome.scripting.executeScript({
@@ -13,23 +43,22 @@ async function getSummary(text, tab) {
         });
       }
 
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': ANTHROPIC_API_KEY,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true',
+          'Authorization': `Bearer ${OPENAI_API_KEY}`,
         },
         body: JSON.stringify({
-          model: 'claude-3-5-haiku-latest', // or your preferred model
-          max_tokens: 8192,
+          model: 'o3',
+          max_completion_tokens: 8192,
           messages: [
             {
               role: 'user',
               content: `Summarize:\n\n${text}`,
             },
           ],
+          reasoning_effort: 'medium',
           stream: true,
         }),
       });
@@ -49,8 +78,8 @@ async function getSummary(text, tab) {
           if (line.startsWith('data: ')) {
             try {
               const data = JSON.parse(line.slice(6));
-              if (data.type === 'content_block_delta') {
-                summary += data.delta.text;
+              if (data.choices && data.choices[0] && data.choices[0].delta && data.choices[0].delta.content) {
+                summary += data.choices[0].delta.content;
 
                 // Stream partial updates back to the content script
                 if (tab) {
@@ -78,6 +107,19 @@ async function getSummary(text, tab) {
 async function getDraftResponse(text, tab, instructions = '') {
   return new Promise(async (resolve) => {
     try {
+      // Check if API key is configured
+      if (!ANTHROPIC_API_KEY || ANTHROPIC_API_KEY === 'your-anthropic-api-key-here') {
+        const errorMsg = 'Anthropic API key not configured. Please create config.js from config.example.js and add your API key.';
+        console.error(errorMsg);
+        if (tab) {
+          chrome.tabs.sendMessage(tab.id, {
+            action: 'displaySummary',
+            summary: errorMsg
+          });
+        }
+        resolve(errorMsg);
+        return;
+      }
       // If we have a tab, ensure content.js is loaded
       if (tab) {
         await chrome.scripting.executeScript({
@@ -95,7 +137,7 @@ async function getDraftResponse(text, tab, instructions = '') {
           'anthropic-dangerous-direct-browser-access': 'true',
         },
         body: JSON.stringify({
-          model: 'claude-3-7-sonnet-latest',
+          model: 'claude-3-5-sonnet-latest',
           max_tokens: 8192,
           messages: [
             {
@@ -165,11 +207,23 @@ async function getVideoSummary(videoId, tab) {
       { video_id: videoId }
     );
 
+    // Check if we got a valid transcript
+    if (!nativeResponse.text || nativeResponse.text.startsWith('Error')) {
+      throw new Error(nativeResponse.text || 'No transcript received');
+    }
+
     // Use existing summary function with native response
     return getSummary(nativeResponse.text, tab);
   } catch (error) {
-    console.error('Error:', error);
-    return 'Failed to get video information. Make sure the native host is installed and running.';
+    console.error('Native messaging error:', error);
+    // Send error message to content script
+    if (tab) {
+      chrome.tabs.sendMessage(tab.id, {
+        action: 'displaySummary',
+        summary: `Failed to get video transcript. Error: ${error.message}\n\nMake sure:\n1. Native host is installed at ~/Library/Application Support/Google/Chrome/NativeMessagingHosts/\n2. Extension ID in com.ytsummary.json matches your extension\n3. Python script has correct permissions`
+      });
+    }
+    return;
   }
 }
 
