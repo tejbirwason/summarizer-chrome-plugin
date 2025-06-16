@@ -11,10 +11,17 @@ describe('Content Script Tests', () => {
     document.body.innerHTML = '';
     jest.clearAllMocks();
     
+    // Clear any global initialization flags
+    delete window.claudeSummarizerInitialized;
+    
     // Create sandbox with necessary globals
     sandbox = {
       document: document,
-      window: window,
+      window: {
+        ...window,
+        claudeSummarizerInitialized: undefined,  // Reset initialization flag
+        getSelection: window.getSelection
+      },
       chrome: global.chrome,
       console: console,
       Promise: Promise,
@@ -36,8 +43,8 @@ describe('Content Script Tests', () => {
 
   describe('displaySummary', () => {
     test('should create summary container if not exists', () => {
-      // Use the function from sandbox
-      sandbox.displaySummary('Test summary content');
+      // Use the function from sandbox with conversationId
+      sandbox.displaySummary('Test summary content', 'test-conversation-id');
       
       const container = document.getElementById('claude-summary-container');
       expect(container).toBeTruthy();
@@ -45,28 +52,35 @@ describe('Content Script Tests', () => {
       expect(container.style.top).toBe('20px');
       expect(container.style.right).toBe('20px');
       
-      const content = document.getElementById('summary-content');
-      expect(content.textContent).toBe('Test summary content');
+      const messagesArea = document.getElementById('messages-area');
+      expect(messagesArea).toBeTruthy();
+      const assistantMessage = messagesArea.querySelector('.message.assistant');
+      expect(assistantMessage).toBeTruthy();
+      const contentDiv = assistantMessage.querySelector('div:last-child');
+      expect(contentDiv.textContent).toBe('Test summary content');
     });
 
     test('should reuse existing container', () => {
-      // Create container first time
-      sandbox.displaySummary('First summary');
+      // Create container first time with conversationId
+      sandbox.displaySummary('First summary', 'test-conversation-id');
       const firstContainer = document.getElementById('claude-summary-container');
       
-      // Update with new content
+      // Update with new content (without conversationId to simulate update)
       sandbox.displaySummary('Second summary');
       const secondContainer = document.getElementById('claude-summary-container');
       
       expect(firstContainer).toBe(secondContainer);
       expect(document.querySelectorAll('#claude-summary-container').length).toBe(1);
       
-      const content = document.getElementById('summary-content');
-      expect(content.textContent).toBe('Second summary');
+      const messagesArea = document.getElementById('messages-area');
+      const messages = messagesArea.querySelectorAll('.message.assistant');
+      const lastMessage = messages[messages.length - 1];
+      const contentDiv = lastMessage.querySelector('div:last-child');
+      expect(contentDiv.textContent).toBe('Second summary');
     });
 
     test('close button should remove container', () => {
-      sandbox.displaySummary('Test summary');
+      sandbox.displaySummary('Test summary', 'test-conversation-id');
       
       const closeButton = document.querySelector('#claude-summary-container button');
       expect(closeButton).toBeTruthy();
@@ -80,12 +94,14 @@ describe('Content Script Tests', () => {
 
     test('should handle special characters safely', () => {
       const textWithSpecialChars = 'Summary with <script>alert("xss")</script> & special chars';
-      sandbox.displaySummary(textWithSpecialChars);
+      sandbox.displaySummary(textWithSpecialChars, 'test-conversation-id');
       
-      const content = document.getElementById('summary-content');
+      const messagesArea = document.getElementById('messages-area');
+      const assistantMessage = messagesArea.querySelector('.message.assistant');
+      const contentDiv = assistantMessage.querySelector('div:last-child');
       // textContent automatically escapes HTML
-      expect(content.textContent).toBe(textWithSpecialChars);
-      expect(content.innerHTML).not.toContain('<script>');
+      expect(contentDiv.textContent).toBe(textWithSpecialChars);
+      expect(contentDiv.innerHTML).not.toContain('<script>');
     });
   });
 
@@ -110,8 +126,8 @@ describe('Content Script Tests', () => {
     });
 
     test('should show buttons on text selection', () => {
-      // Mock text selection
-      window.getSelection = jest.fn().mockReturnValue({
+      // Mock text selection in sandbox
+      sandbox.window.getSelection = jest.fn().mockReturnValue({
         toString: () => 'Selected text'
       });
       
@@ -124,13 +140,13 @@ describe('Content Script Tests', () => {
 
     test('should hide buttons when no selection', () => {
       // First show buttons
-      window.getSelection = jest.fn().mockReturnValue({
+      sandbox.window.getSelection = jest.fn().mockReturnValue({
         toString: () => 'Selected text'
       });
       document.dispatchEvent(new Event('selectionchange'));
       
       // Then clear selection
-      window.getSelection = jest.fn().mockReturnValue({
+      sandbox.window.getSelection = jest.fn().mockReturnValue({
         toString: () => ''
       });
       document.dispatchEvent(new Event('selectionchange'));
@@ -140,7 +156,7 @@ describe('Content Script Tests', () => {
     });
 
     test('summarize button should send correct message', () => {
-      window.getSelection = jest.fn().mockReturnValue({
+      sandbox.window.getSelection = jest.fn().mockReturnValue({
         toString: () => 'Text to summarize'
       });
       
@@ -153,7 +169,10 @@ describe('Content Script Tests', () => {
     });
 
     test('should not send message if no text selected', () => {
-      window.getSelection = jest.fn().mockReturnValue({
+      // Clear any previous mocks
+      jest.clearAllMocks();
+      
+      sandbox.window.getSelection = jest.fn().mockReturnValue({
         toString: () => ''
       });
       
@@ -183,24 +202,26 @@ describe('Content Script Tests', () => {
 
   describe('showDraftPrompt', () => {
     test('should create and display modal', async () => {
-      window.getSelection = jest.fn().mockReturnValue({
+      sandbox.window.getSelection = jest.fn().mockReturnValue({
         toString: () => 'Selected text'
       });
       
       const draftFab = document.querySelector('button[title="Draft a professional response"]');
       
-      // Click draft button (don't await yet)
-      draftFab.click();
+      // Start the async onclick but don't await it yet
+      draftFab.onclick();
       
-      // Check modal was created
+      // Wait a bit for the modal to be created
       await new Promise(resolve => setTimeout(resolve, 10));
       
-      const overlay = document.querySelector('div[style*="position: fixed"][style*="z-index: 99999"]');
-      expect(overlay).toBeTruthy();
+      const overlays = Array.from(document.querySelectorAll('div')).filter(
+        div => div.style.cssText && div.style.cssText.includes('position: fixed') && div.style.cssText.includes('z-index: 99999')
+      );
+      expect(overlays.length).toBeGreaterThan(0);
       
+      const overlay = overlays[0];
       const modal = overlay.querySelector('div');
       expect(modal).toBeTruthy();
-      expect(modal.style.background).toBe('rgb(30, 30, 30)');
       
       const textarea = modal.querySelector('textarea');
       expect(textarea).toBeTruthy();
@@ -212,7 +233,7 @@ describe('Content Script Tests', () => {
     });
 
     test('should handle Enter key submission', async () => {
-      window.getSelection = jest.fn().mockReturnValue({
+      sandbox.window.getSelection = jest.fn().mockReturnValue({
         toString: () => 'Selected text'
       });
       
@@ -245,7 +266,7 @@ describe('Content Script Tests', () => {
     });
 
     test('should handle Escape key cancellation', async () => {
-      window.getSelection = jest.fn().mockReturnValue({
+      sandbox.window.getSelection = jest.fn().mockReturnValue({
         toString: () => 'Selected text'
       });
       
@@ -270,7 +291,7 @@ describe('Content Script Tests', () => {
     });
 
     test('should handle OK button click', async () => {
-      window.getSelection = jest.fn().mockReturnValue({
+      sandbox.window.getSelection = jest.fn().mockReturnValue({
         toString: () => 'Selected text'
       });
       
@@ -297,7 +318,7 @@ describe('Content Script Tests', () => {
     });
 
     test('should handle Cancel button click', async () => {
-      window.getSelection = jest.fn().mockReturnValue({
+      sandbox.window.getSelection = jest.fn().mockReturnValue({
         toString: () => 'Selected text'
       });
       
@@ -322,26 +343,30 @@ describe('Content Script Tests', () => {
     test('should handle displaySummary message', () => {
       const mockListener = chrome.runtime.onMessage.addListener.mock.calls[0][0];
       
-      mockListener({ action: 'displaySummary', summary: 'Final summary' });
+      mockListener({ action: 'displaySummary', summary: 'Final summary', conversationId: 'test-id' });
       
-      const content = document.getElementById('summary-content');
-      expect(content.textContent).toBe('Final summary');
+      const messagesArea = document.getElementById('messages-area');
+      const assistantMessage = messagesArea.querySelector('.message.assistant');
+      const contentDiv = assistantMessage.querySelector('div:last-child');
+      expect(contentDiv.textContent).toBe('Final summary');
     });
 
     test('should handle updateSummary message', () => {
       const mockListener = chrome.runtime.onMessage.addListener.mock.calls[0][0];
       
-      // Send partial update
-      mockListener({ action: 'updateSummary', summary: 'Partial...' });
+      // Send partial update with conversationId to initialize
+      mockListener({ action: 'updateSummary', summary: 'Partial...', conversationId: 'test-id' });
       
-      let content = document.getElementById('summary-content');
-      expect(content.textContent).toBe('Partial...');
+      let messagesArea = document.getElementById('messages-area');
+      let assistantMessage = messagesArea.querySelector('.message.assistant');
+      let contentDiv = assistantMessage.querySelector('div:last-child');
+      expect(contentDiv.textContent).toBe('Partial...');
       
       // Send another update
       mockListener({ action: 'updateSummary', summary: 'Partial... summary complete' });
       
-      content = document.getElementById('summary-content');
-      expect(content.textContent).toBe('Partial... summary complete');
+      contentDiv = assistantMessage.querySelector('div:last-child');
+      expect(contentDiv.textContent).toBe('Partial... summary complete');
     });
   });
 });

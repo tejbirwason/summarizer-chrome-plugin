@@ -26,6 +26,9 @@ describe('Background Script Tests', () => {
       getSummary: null,
       getDraftResponse: null,
       getVideoSummary: null,
+      crypto: {
+        randomUUID: () => 'test-uuid-' + Math.random().toString(36).substr(2, 9)
+      },
       importScripts: function(script) {
         // Mock importScripts - config.js will fail to load in tests
         throw new Error('Cannot load ' + script);
@@ -239,7 +242,14 @@ describe('Background Script Tests', () => {
         TextDecoder: global.TextDecoder,
         TextEncoder: global.TextEncoder,
         console: console,
-        Promise: Promise
+        Promise: Promise,
+        crypto: {
+          randomUUID: () => 'test-uuid-' + Math.random().toString(36).substr(2, 9)
+        },
+        CONFIG: {
+          OPENAI_API_KEY: 'test-openai-key',
+          ANTHROPIC_API_KEY: 'test-anthropic-key'
+        }
       };
       
       const backgroundCode = fs.readFileSync(path.join(__dirname, '../background.js'), 'utf8');
@@ -280,7 +290,14 @@ describe('Background Script Tests', () => {
         TextDecoder: global.TextDecoder,
         TextEncoder: global.TextEncoder,
         console: console,
-        Promise: Promise
+        Promise: Promise,
+        crypto: {
+          randomUUID: () => 'test-uuid-' + Math.random().toString(36).substr(2, 9)
+        },
+        CONFIG: {
+          OPENAI_API_KEY: 'test-openai-key',
+          ANTHROPIC_API_KEY: 'test-anthropic-key'
+        }
       };
       
       const backgroundCode = fs.readFileSync(path.join(__dirname, '../background.js'), 'utf8');
