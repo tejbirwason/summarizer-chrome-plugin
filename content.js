@@ -26,7 +26,7 @@ function displaySummary(summary, conversationId = null) {
       border-radius: 8px;
       box-shadow: 0 2px 10px rgba(0,0,0,0.3);
       z-index: 10000;
-      font-size: 13px;
+      font-size: 16px;
       line-height: 1.6;
       font-family: -apple-system, BlinkMacSystemFont,
         "Segoe UI", Roboto, Oxygen-Sans,
@@ -72,8 +72,7 @@ function displaySummary(summary, conversationId = null) {
     const inputContainer = document.createElement('div');
     inputContainer.id = 'input-container';
     inputContainer.style.cssText = `
-      display: flex;
-      gap: 10px;
+      position: relative;
       margin-top: 10px;
       padding-top: 10px;
       border-top: 1px solid #444;
@@ -84,29 +83,43 @@ function displaySummary(summary, conversationId = null) {
     chatInput.id = 'chat-input';
     chatInput.placeholder = 'Ask a follow-up question...';
     chatInput.style.cssText = `
-      flex: 1;
+      width: 100%;
       background: #2a2a2a;
       color: #e0e0e0;
       border: 1px solid #444;
       border-radius: 4px;
-      padding: 8px;
-      font-size: 12px;
+      padding: 8px 40px 8px 8px;
+      font-size: 16px;
       font-family: inherit;
-      height: 32px;
+      height: 36px;
+      box-sizing: border-box;
     `;
 
     const sendButton = document.createElement('button');
-    sendButton.textContent = 'Send';
+    sendButton.innerHTML = '➤';
     sendButton.style.cssText = `
-      background: #5C5CFF;
-      color: white;
+      position: absolute;
+      right: 2px;
+      top: 12px;
+      background: transparent;
+      color: #5C5CFF;
       border: none;
-      border-radius: 4px;
-      padding: 8px 16px;
       cursor: pointer;
-      font-size: 12px;
+      font-size: 20px;
+      width: 32px;
       height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
+      transition: background 0.2s;
     `;
+    sendButton.onmouseover = () => {
+      sendButton.style.background = 'rgba(92, 92, 255, 0.1)';
+    };
+    sendButton.onmouseout = () => {
+      sendButton.style.background = 'transparent';
+    };
 
     // Handle send functionality
     const sendMessage = () => {
@@ -197,13 +210,16 @@ function addMessageToUI(role, content, skipHistory = false) {
     font-weight: bold;
     margin-bottom: 5px;
     color: ${role === 'user' ? '#8B8BFF' : '#50C550'};
-    font-size: 12px;
+    font-size: 14px;
     text-transform: uppercase;
   `;
   roleLabel.textContent = role === 'user' ? 'You' : 'Assistant';
 
   const contentDiv = document.createElement('div');
-  contentDiv.style.whiteSpace = 'pre-wrap';
+  contentDiv.style.cssText = `
+    white-space: pre-wrap;
+    font-size: 16px;
+  `;
   contentDiv.textContent = content;
 
   messageDiv.appendChild(roleLabel);
