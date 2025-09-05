@@ -7,9 +7,20 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
   let currentConversationId = null;
   let conversationHistory = [];
   let isInitialSummaryCreated = false;
+  let currentTranscript = null;
 
-function displaySummary(summary, conversationId = null) {
+function displaySummary(summary, conversationId = null, isDraft = false, transcript = null) {
   let container = document.getElementById('claude-summary-container');
+  
+  // Store transcript if provided
+  if (transcript) {
+    currentTranscript = transcript;
+    // Show copy transcript button when we have a transcript
+    const copyBtn = document.getElementById('copy-transcript-btn');
+    if (copyBtn) {
+      copyBtn.style.display = 'flex';
+    }
+  }
 
   if (!container) {
     container = document.createElement('div');
@@ -22,7 +33,7 @@ function displaySummary(summary, conversationId = null) {
       max-height: 80vh;
       background: #1e1e1e;
       color: #e0e0e0;
-      padding: 15px;
+      padding: 0;
       border-radius: 8px;
       box-shadow: 0 2px 10px rgba(0,0,0,0.3);
       z-index: 10000;
@@ -33,32 +44,160 @@ function displaySummary(summary, conversationId = null) {
         Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
     `;
 
+    // Create a drag handle (top bar)
+    const dragHandle = document.createElement('div');
+    dragHandle.id = 'drag-handle';
+    dragHandle.style.cssText = `
+      height: 35px;
+      background: #2a2a2a;
+      border-radius: 8px 8px 0 0;
+      cursor: move;
+      display: flex;
+      align-items: center;
+      padding: 0 15px;
+    `;
+
+    // Make container draggable via the drag handle
+    let isDragging = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let elementStartX = 0;
+    let elementStartY = 0;
+
+    dragHandle.addEventListener('mousedown', (e) => {
+      // Don't start drag if clicking on the close button
+      if (e.target.tagName === 'BUTTON') {
+        return;
+      }
+      
+      isDragging = true;
+      dragStartX = e.clientX;
+      dragStartY = e.clientY;
+      
+      const rect = container.getBoundingClientRect();
+      elementStartX = rect.left;
+      elementStartY = rect.top;
+      
+      e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      
+      const deltaX = e.clientX - dragStartX;
+      const deltaY = e.clientY - dragStartY;
+      
+      container.style.left = `${elementStartX + deltaX}px`;
+      container.style.top = `${elementStartY + deltaY}px`;
+      container.style.right = 'auto';
+    });
+
+    document.addEventListener('mouseup', () => {
+      isDragging = false;
+    });
+
+    // Add title to drag handle
+    const titleLabel = document.createElement('span');
+    titleLabel.textContent = 'AI Summary';
+    titleLabel.style.cssText = `
+      color: #e0e0e0;
+      font-size: 14px;
+      font-weight: 500;
+    `;
+    dragHandle.appendChild(titleLabel);
+
+    // Add button container for header buttons
+    const headerButtons = document.createElement('div');
+    headerButtons.style.cssText = `
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: auto;
+    `;
+
+    // Add copy transcript button (initially hidden)
+    const copyTranscriptButton = document.createElement('button');
+    copyTranscriptButton.id = 'copy-transcript-btn';
+    copyTranscriptButton.innerHTML = '📄';
+    copyTranscriptButton.title = 'Copy full transcript';
+    copyTranscriptButton.style.cssText = `
+      border: none;
+      background: none;
+      font-size: 16px;
+      cursor: pointer;
+      color: #e0e0e0;
+      padding: 4px 8px;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
+      transition: background 0.2s;
+    `;
+    copyTranscriptButton.onmouseover = () => {
+      copyTranscriptButton.style.background = 'rgba(255, 255, 255, 0.1)';
+    };
+    copyTranscriptButton.onmouseout = () => {
+      copyTranscriptButton.style.background = 'none';
+    };
+    copyTranscriptButton.onclick = () => {
+      if (currentTranscript) {
+        navigator.clipboard.writeText(currentTranscript).then(() => {
+          // Show feedback
+          const originalText = copyTranscriptButton.innerHTML;
+          copyTranscriptButton.innerHTML = '✓';
+          copyTranscriptButton.style.color = '#50C550';
+          setTimeout(() => {
+            copyTranscriptButton.innerHTML = originalText;
+            copyTranscriptButton.style.color = '#e0e0e0';
+          }, 1500);
+        }).catch(err => {
+          console.error('Failed to copy transcript:', err);
+        });
+      }
+    };
+
     const closeButton = document.createElement('button');
     closeButton.innerHTML = '×';
     closeButton.style.cssText = `
-      position: absolute;
-      top: 5px;
-      right: 5px;
       border: none;
       background: none;
       font-size: 20px;
       cursor: pointer;
       color: #e0e0e0;
+      padding: 0;
+      width: 25px;
+      height: 25px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
+      transition: background 0.2s;
     `;
+    closeButton.onmouseover = () => {
+      closeButton.style.background = 'rgba(255, 255, 255, 0.1)';
+    };
+    closeButton.onmouseout = () => {
+      closeButton.style.background = 'none';
+    };
     closeButton.onclick = () => {
       container.remove();
       currentConversationId = null;
       conversationHistory = [];
       isInitialSummaryCreated = false;
+      currentTranscript = null;
     };
+
+    const contentWrapper = document.createElement('div');
+    contentWrapper.style.cssText = `
+      padding: 15px;
+    `;
 
     const chatContainer = document.createElement('div');
     chatContainer.id = 'chat-container';
     chatContainer.style.cssText = `
       display: flex;
       flex-direction: column;
-      height: calc(80vh - 45px);
-      margin-top: 30px;
+      height: calc(80vh - 65px);
     `;
 
     const messagesArea = document.createElement('div');
@@ -136,11 +275,22 @@ function displaySummary(summary, conversationId = null) {
 
       // Send to background script with error handling
       try {
-        chrome.runtime.sendMessage({
-          action: 'continueConversation',
-          conversationId: currentConversationId,
-          message: message
-        });
+        // Check if this is a draft conversation
+        if (currentConversationId && currentConversationId.startsWith('draft-')) {
+          chrome.runtime.sendMessage({
+            action: 'continueDraftConversation',
+            conversationId: currentConversationId,
+            message: message,
+            history: conversationHistory,
+            originalThread: window.lastDraftThread || ''
+          });
+        } else {
+          chrome.runtime.sendMessage({
+            action: 'continueConversation',
+            conversationId: currentConversationId,
+            message: message
+          });
+        }
       } catch (error) {
         console.error('Failed to send message:', error);
         // Re-enable input on error
@@ -164,13 +314,40 @@ function displaySummary(summary, conversationId = null) {
     chatContainer.appendChild(messagesArea);
     chatContainer.appendChild(inputContainer);
 
-    container.appendChild(closeButton);
-    container.appendChild(chatContainer);
+    headerButtons.appendChild(copyTranscriptButton);
+    headerButtons.appendChild(closeButton);
+    dragHandle.appendChild(headerButtons);
+    container.appendChild(dragHandle);
+    contentWrapper.appendChild(chatContainer);
+    container.appendChild(contentWrapper);
     document.body.appendChild(container);
   }
 
-  // If we have a conversation ID, handle streaming properly
-  if (conversationId) {
+  // If this is a draft response, treat it like a conversation
+  if (isDraft) {
+    // Generate a conversation ID for drafts
+    if (!currentConversationId) {
+      currentConversationId = 'draft-' + Date.now();
+      conversationHistory = [];
+      isInitialSummaryCreated = false;
+    }
+    
+    if (!isInitialSummaryCreated) {
+      // First chunk - create the assistant message  
+      addMessageToUI('assistant', summary);
+      isInitialSummaryCreated = true;
+    } else {
+      // Subsequent chunks - update the existing message
+      updateLastMessage(summary);
+    }
+    
+    // Make sure input is visible for drafts
+    const inputContainer = document.getElementById('input-container');
+    if (inputContainer) {
+      inputContainer.style.display = 'block';
+    }
+  } else if (conversationId) {
+    // Regular summary with conversation
     if (currentConversationId !== conversationId) {
       // New conversation starting
       currentConversationId = conversationId;
@@ -203,17 +380,64 @@ function addMessageToUI(role, content, skipHistory = false) {
     padding: 10px;
     border-radius: 6px;
     background: ${role === 'user' ? '#3a3a3a' : '#2a2a2a'};
+    position: relative;
+  `;
+
+  const headerDiv = document.createElement('div');
+  headerDiv.style.cssText = `
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 5px;
   `;
 
   const roleLabel = document.createElement('div');
   roleLabel.style.cssText = `
     font-weight: bold;
-    margin-bottom: 5px;
     color: ${role === 'user' ? '#8B8BFF' : '#50C550'};
     font-size: 14px;
     text-transform: uppercase;
   `;
   roleLabel.textContent = role === 'user' ? 'You' : 'Assistant';
+
+  headerDiv.appendChild(roleLabel);
+
+  // Add copy button for assistant messages
+  if (role === 'assistant') {
+    const copyButton = document.createElement('button');
+    copyButton.innerHTML = '📋';
+    copyButton.title = 'Copy to clipboard';
+    copyButton.style.cssText = `
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      font-size: 16px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      transition: background 0.2s;
+    `;
+    copyButton.onmouseover = () => {
+      copyButton.style.background = 'rgba(255, 255, 255, 0.1)';
+    };
+    copyButton.onmouseout = () => {
+      copyButton.style.background = 'transparent';
+    };
+    copyButton.onclick = () => {
+      navigator.clipboard.writeText(content).then(() => {
+        // Show feedback
+        const originalText = copyButton.innerHTML;
+        copyButton.innerHTML = '✓';
+        copyButton.style.color = '#50C550';
+        setTimeout(() => {
+          copyButton.innerHTML = originalText;
+          copyButton.style.color = '';
+        }, 1500);
+      }).catch(err => {
+        console.error('Failed to copy:', err);
+      });
+    };
+    headerDiv.appendChild(copyButton);
+  }
 
   const contentDiv = document.createElement('div');
   contentDiv.style.cssText = `
@@ -222,7 +446,7 @@ function addMessageToUI(role, content, skipHistory = false) {
   `;
   contentDiv.textContent = content;
 
-  messageDiv.appendChild(roleLabel);
+  messageDiv.appendChild(headerDiv);
   messageDiv.appendChild(contentDiv);
   messagesArea.appendChild(messageDiv);
 
@@ -245,6 +469,24 @@ function updateLastMessage(content) {
     const contentDiv = lastMessage.querySelector('div:last-child');
     if (contentDiv) {
       contentDiv.textContent = content;
+      
+      // Update the copy button's onclick to use the new content
+      const copyButton = lastMessage.querySelector('button[title="Copy to clipboard"]');
+      if (copyButton) {
+        copyButton.onclick = () => {
+          navigator.clipboard.writeText(content).then(() => {
+            const originalText = copyButton.innerHTML;
+            copyButton.innerHTML = '✓';
+            copyButton.style.color = '#50C550';
+            setTimeout(() => {
+              copyButton.innerHTML = originalText;
+              copyButton.style.color = '';
+            }, 1500);
+          }).catch(err => {
+            console.error('Failed to copy:', err);
+          });
+        };
+      }
     }
   }
 }
@@ -344,22 +586,30 @@ function injectFABs() {
     const selectedText = window.getSelection().toString();
     if (!selectedText) return;
 
-    // Show prompt to gather extra instructions
-    const userInstructions = await showDraftPrompt();
-    if (userInstructions === null) {
-      return; // user canceled
-    }
+    // Show loading state
+    draftFab.disabled = true;
+    draftFab.innerHTML = '⏳';
+    draftFab.style.cursor = 'wait';
 
-    // Send both selected text & user instructions to background
-    try {
-      chrome.runtime.sendMessage({
-        action: 'draft',
-        text: selectedText,
-        instructions: userInstructions,
-      });
-    } catch (error) {
-      console.error('Failed to send message:', error);
-    }
+    // Save the original thread for conversation context
+    window.lastDraftThread = selectedText;
+    
+    // Open the summary box with the selected text as initial message
+    displaySummary('', 'draft-' + Date.now(), true);
+    
+    // Add the selected text as the initial user message
+    setTimeout(() => {
+      const chatInput = document.getElementById('chat-input');
+      if (chatInput) {
+        chatInput.value = selectedText;
+        chatInput.focus();
+      }
+      
+      // Reset draft button state
+      draftFab.disabled = false;
+      draftFab.innerHTML = '✒️';
+      draftFab.style.cursor = 'pointer';
+    }, 100);
   };
 
   // Toggle both FABs if there's a selection
@@ -388,7 +638,42 @@ chrome.runtime.onMessage.addListener((request) => {
     request.action === 'displaySummary' ||
     request.action === 'updateSummary'
   ) {
-    displaySummary(request.summary, request.conversationId);
+    displaySummary(request.summary, request.conversationId, false, request.transcript);
+  }
+  
+  if (request.action === 'displayDraft' || request.action === 'updateDraft') {
+    displaySummary(request.draft || request.summary, null, true);
+  }
+  
+  if (request.action === 'draftConversationUpdate') {
+    const messagesArea = document.getElementById('messages-area');
+    if (!messagesArea) return;
+    
+    // Check if we need to create a new assistant message bubble
+    const messages = messagesArea.querySelectorAll('.message');
+    const lastMessage = messages[messages.length - 1];
+    
+    if (!lastMessage || lastMessage.classList.contains('user')) {
+      // Last message is from user or no messages, create new assistant message
+      addMessageToUI('assistant', request.response, true);
+    } else if (lastMessage.classList.contains('assistant')) {
+      // Update existing assistant message
+      updateLastMessage(request.response);
+    }
+    
+    // Re-enable input when done
+    const chatInput = document.getElementById('chat-input');
+    const sendButton = document.querySelector('#input-container button');
+    if (chatInput) chatInput.disabled = false;
+    if (sendButton) sendButton.disabled = false;
+  }
+  
+  if (request.action === 'draftConversationComplete') {
+    // Update conversation history with the final response
+    const lastHistoryEntry = conversationHistory[conversationHistory.length - 1];
+    if (!lastHistoryEntry || lastHistoryEntry.role !== 'assistant') {
+      conversationHistory.push({ role: 'assistant', content: request.response });
+    }
     
     // Reset summarize button state when we start getting responses
     const summarizeFab = document.querySelector('.fab[title="Summarize selection"]');
@@ -439,82 +724,17 @@ chrome.runtime.onMessage.addListener((request) => {
     if (chatInput) chatInput.disabled = false;
     if (sendButton) sendButton.disabled = false;
   }
+  
+  if (request.action === 'summaryComplete') {
+    // Reset summarize button state when summary is complete
+    const summarizeFab = document.querySelector('.fab[title="Summarize selection"]');
+    if (summarizeFab && summarizeFab.disabled) {
+      summarizeFab.disabled = false;
+      summarizeFab.innerHTML = '✨';
+      summarizeFab.style.cursor = 'pointer';
+    }
+  }
 });
 
-function showDraftPrompt() {
-  return new Promise((resolve) => {
-    // Create overlay
-    const overlay = document.createElement('div');
-    overlay.style.cssText = `
-      position: fixed;
-      top: 0; left: 0;
-      width: 100vw; height: 100vh;
-      background: rgba(0,0,0,0.5);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 99999;
-    `;
-
-    // Create modal
-    const modal = document.createElement('div');
-    modal.style.cssText = `
-      background: #1e1e1e;
-      color: #e0e0e0;
-      padding: 20px;
-      border-radius: 8px;
-      width: 400px;
-    `;
-    const label = document.createElement('label');
-    label.innerText = 'Additional instructions:';
-    label.style.display = 'block';
-    label.style.marginBottom = '10px';
-
-    const textArea = document.createElement('textarea');
-    textArea.style.width = '100%';
-    textArea.style.height = '80px';
-
-    // Add keyboard event handlers
-    textArea.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        const instructions = textArea.value.trim();
-        document.body.removeChild(overlay);
-        resolve(instructions);
-      } else if (e.key === 'Escape') {
-        document.body.removeChild(overlay);
-        resolve(null);
-      }
-    });
-
-    const buttonBar = document.createElement('div');
-    buttonBar.style.marginTop = '10px';
-    buttonBar.style.textAlign = 'right';
-
-    const okBtn = document.createElement('button');
-    okBtn.innerText = 'OK';
-    okBtn.onclick = () => {
-      const instructions = textArea.value.trim();
-      document.body.removeChild(overlay);
-      resolve(instructions);
-    };
-
-    const cancelBtn = document.createElement('button');
-    cancelBtn.innerText = 'Cancel';
-    cancelBtn.style.marginLeft = '10px';
-    cancelBtn.onclick = () => {
-      document.body.removeChild(overlay);
-      resolve(null);
-    };
-
-    buttonBar.appendChild(okBtn);
-    buttonBar.appendChild(cancelBtn);
-    modal.appendChild(label);
-    modal.appendChild(textArea);
-    modal.appendChild(buttonBar);
-    overlay.appendChild(modal);
-    document.body.appendChild(overlay);
-  });
-}
 
 } // End of initialization check

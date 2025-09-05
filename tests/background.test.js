@@ -15,6 +15,29 @@ describe('Background Script Tests', () => {
     // Save original chrome object
     originalChrome = global.chrome;
     
+    // Mock storage to properly store and retrieve conversations
+    const mockStorage = {};
+    global.chrome.storage.local.set.mockImplementation((data) => {
+      Object.assign(mockStorage, data);
+      return Promise.resolve();
+    });
+    global.chrome.storage.local.get.mockImplementation((keys) => {
+      if (keys === null) {
+        return Promise.resolve(mockStorage);
+      }
+      if (typeof keys === 'string') {
+        return Promise.resolve({ [keys]: mockStorage[keys] });
+      }
+      if (Array.isArray(keys)) {
+        const result = {};
+        keys.forEach(key => {
+          if (mockStorage[key]) result[key] = mockStorage[key];
+        });
+        return Promise.resolve(result);
+      }
+      return Promise.resolve({});
+    });
+    
     // Create a sandbox with all needed globals
     const sandbox = {
       chrome: global.chrome,
@@ -226,8 +249,8 @@ describe('Background Script Tests', () => {
       expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
         789,
         expect.objectContaining({
-          action: 'updateSummary',
-          summary: expect.any(String)
+          action: 'updateDraft',
+          draft: expect.any(String)
         })
       );
     });
@@ -273,11 +296,22 @@ describe('Background Script Tests', () => {
       // Wait for async operations
       await new Promise(resolve => setTimeout(resolve, 100));
       
+      // Should send streaming updates
       expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
         111,
         expect.objectContaining({
-          action: 'displaySummary',
-          summary: 'Summary result'
+          action: 'updateSummary',
+          summary: expect.any(String),
+          conversationId: expect.any(String)
+        })
+      );
+      
+      // Should send completion message
+      expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
+        111,
+        expect.objectContaining({
+          action: 'summaryComplete',
+          conversationId: expect.any(String)
         })
       );
     });
@@ -327,8 +361,8 @@ describe('Background Script Tests', () => {
       expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
         222,
         expect.objectContaining({
-          action: 'displaySummary',
-          summary: 'Draft result'
+          action: 'displayDraft',
+          draft: 'Draft result'
         })
       );
     });

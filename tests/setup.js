@@ -12,6 +12,13 @@ global.chrome = {
   },
   scripting: {
     executeScript: jest.fn()
+  },
+  storage: {
+    local: {
+      set: jest.fn().mockResolvedValue({}),
+      get: jest.fn().mockResolvedValue({}),
+      remove: jest.fn().mockResolvedValue({})
+    }
   }
 };
 

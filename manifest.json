@@ -3,7 +3,7 @@
   "name": "Summarize (o3) & Draft (Claude)",
   "version": "1.0",
   "description": "Two floating emoji buttons: Summarize with o3 & Draft responses with Claude",
-  "permissions": ["activeTab", "scripting", "nativeMessaging"],
+  "permissions": ["activeTab", "scripting", "nativeMessaging", "storage"],
   "host_permissions": ["https://api.anthropic.com/*", "https://api.openai.com/*", "<all_urls>"],
   "background": {
     "service_worker": "background.js"

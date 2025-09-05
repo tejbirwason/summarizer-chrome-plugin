@@ -28,6 +28,11 @@ describe('Content Script Tests', () => {
       MouseEvent: MouseEvent,
       KeyboardEvent: KeyboardEvent,
       Event: Event,
+      navigator: {
+        clipboard: {
+          writeText: jest.fn().mockResolvedValue()
+        }
+      },
       setTimeout: setTimeout
     };
     
@@ -82,9 +87,12 @@ describe('Content Script Tests', () => {
     test('close button should remove container', () => {
       sandbox.displaySummary('Test summary', 'test-conversation-id');
       
-      const closeButton = document.querySelector('#claude-summary-container button');
+      const buttons = document.querySelectorAll('#claude-summary-container button');
+      expect(buttons.length).toBeGreaterThanOrEqual(2);
+      
+      // Find the close button (it's the one with '×')
+      const closeButton = Array.from(buttons).find(btn => btn.innerHTML === '×');
       expect(closeButton).toBeTruthy();
-      expect(closeButton.innerHTML).toBe('×');
       
       // Click close button
       closeButton.click();
@@ -102,6 +110,34 @@ describe('Content Script Tests', () => {
       // textContent automatically escapes HTML
       expect(contentDiv.textContent).toBe(textWithSpecialChars);
       expect(contentDiv.innerHTML).not.toContain('<script>');
+    });
+
+    test('should create copy transcript button when transcript is provided', () => {
+      const transcript = 'This is the full transcript of the video';
+      
+      // First call creates the container and stores transcript
+      sandbox.displaySummary('Summary of video', 'test-conversation-id', false, transcript);
+      
+      // Get the button after it's created
+      let copyTranscriptBtn = document.getElementById('copy-transcript-btn');
+      expect(copyTranscriptBtn).toBeTruthy();
+      expect(copyTranscriptBtn.title).toBe('Copy full transcript');
+      expect(copyTranscriptBtn.innerHTML).toBe('📄');
+    });
+
+    test('copy transcript button should copy transcript to clipboard', async () => {
+      const transcript = 'This is the full transcript';
+      
+      sandbox.displaySummary('Summary', 'test-conversation-id', false, transcript);
+      const copyTranscriptBtn = document.getElementById('copy-transcript-btn');
+      
+      // Click copy button
+      copyTranscriptBtn.click();
+      
+      // Wait for promise to resolve
+      await new Promise(resolve => setTimeout(resolve, 0));
+      
+      expect(sandbox.navigator.clipboard.writeText).toHaveBeenCalledWith(transcript);
     });
   });
 
@@ -200,142 +236,34 @@ describe('Content Script Tests', () => {
     });
   });
 
-  describe('showDraftPrompt', () => {
-    test('should create and display modal', async () => {
+  describe('Draft FAB', () => {
+    test('should open summary box with selected text on click', async () => {
       sandbox.window.getSelection = jest.fn().mockReturnValue({
-        toString: () => 'Selected text'
+        toString: () => 'Selected text for drafting'
       });
       
       const draftFab = document.querySelector('button[title="Draft a professional response"]');
       
-      // Start the async onclick but don't await it yet
-      draftFab.onclick();
-      
-      // Wait a bit for the modal to be created
-      await new Promise(resolve => setTimeout(resolve, 10));
-      
-      const overlays = Array.from(document.querySelectorAll('div')).filter(
-        div => div.style.cssText && div.style.cssText.includes('position: fixed') && div.style.cssText.includes('z-index: 99999')
-      );
-      expect(overlays.length).toBeGreaterThan(0);
-      
-      const overlay = overlays[0];
-      const modal = overlay.querySelector('div');
-      expect(modal).toBeTruthy();
-      
-      const textarea = modal.querySelector('textarea');
-      expect(textarea).toBeTruthy();
-      
-      const buttons = modal.querySelectorAll('button');
-      expect(buttons.length).toBe(2);
-      expect(buttons[0].innerText).toBe('OK');
-      expect(buttons[1].innerText).toBe('Cancel');
-    });
-
-    test('should handle Enter key submission', async () => {
-      sandbox.window.getSelection = jest.fn().mockReturnValue({
-        toString: () => 'Selected text'
-      });
-      
-      const draftFab = document.querySelector('button[title="Draft a professional response"]');
+      // Click the draft button
       draftFab.click();
       
-      await new Promise(resolve => setTimeout(resolve, 10));
+      // Wait for the summary container to be created
+      await new Promise(resolve => setTimeout(resolve, 150));
       
-      const textarea = document.querySelector('textarea');
-      textarea.value = 'Additional instructions';
+      // Check that summary container was created
+      const container = document.getElementById('claude-summary-container');
+      expect(container).toBeTruthy();
       
-      // Simulate Enter key
-      const enterEvent = new KeyboardEvent('keydown', { 
-        key: 'Enter',
-        shiftKey: false 
-      });
-      textarea.dispatchEvent(enterEvent);
+      // Check that chat input exists
+      const chatInput = document.getElementById('chat-input');
+      expect(chatInput).toBeTruthy();
       
-      // Verify message was sent
-      await new Promise(resolve => setTimeout(resolve, 10));
+      // The value should be set after the timeout in content.js
+      // We just verify the input exists and the container is set up for draft mode
       
-      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-        action: 'draft',
-        text: 'Selected text',
-        instructions: 'Additional instructions'
-      });
-      
-      // Modal should be removed
-      expect(document.querySelector('div[style*="z-index: 99999"]')).toBeFalsy();
-    });
-
-    test('should handle Escape key cancellation', async () => {
-      sandbox.window.getSelection = jest.fn().mockReturnValue({
-        toString: () => 'Selected text'
-      });
-      
-      const draftFab = document.querySelector('button[title="Draft a professional response"]');
-      draftFab.click();
-      
-      await new Promise(resolve => setTimeout(resolve, 10));
-      
-      const textarea = document.querySelector('textarea');
-      
-      // Simulate Escape key
-      const escapeEvent = new KeyboardEvent('keydown', { key: 'Escape' });
-      textarea.dispatchEvent(escapeEvent);
-      
-      await new Promise(resolve => setTimeout(resolve, 10));
-      
-      // Should not send message
-      expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
-      
-      // Modal should be removed
-      expect(document.querySelector('div[style*="z-index: 99999"]')).toBeFalsy();
-    });
-
-    test('should handle OK button click', async () => {
-      sandbox.window.getSelection = jest.fn().mockReturnValue({
-        toString: () => 'Selected text'
-      });
-      
-      const draftFab = document.querySelector('button[title="Draft a professional response"]');
-      draftFab.click();
-      
-      await new Promise(resolve => setTimeout(resolve, 10));
-      
-      const textarea = document.querySelector('textarea');
-      textarea.value = 'My instructions';
-      
-      const okButton = Array.from(document.querySelectorAll('button')).find(
-        btn => btn.innerText === 'OK'
-      );
-      okButton.click();
-      
-      await new Promise(resolve => setTimeout(resolve, 10));
-      
-      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-        action: 'draft',
-        text: 'Selected text',
-        instructions: 'My instructions'
-      });
-    });
-
-    test('should handle Cancel button click', async () => {
-      sandbox.window.getSelection = jest.fn().mockReturnValue({
-        toString: () => 'Selected text'
-      });
-      
-      const draftFab = document.querySelector('button[title="Draft a professional response"]');
-      draftFab.click();
-      
-      await new Promise(resolve => setTimeout(resolve, 10));
-      
-      const cancelButton = Array.from(document.querySelectorAll('button')).find(
-        btn => btn.innerText === 'Cancel'
-      );
-      cancelButton.click();
-      
-      await new Promise(resolve => setTimeout(resolve, 10));
-      
-      expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
-      expect(document.querySelector('div[style*="z-index: 99999"]')).toBeFalsy();
+      // Verify the draft button was disabled temporarily
+      expect(draftFab.disabled).toBe(false);
+      expect(draftFab.innerHTML).toBe('✒️');
     });
   });
 

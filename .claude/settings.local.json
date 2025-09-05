@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:platform.openai.com)",
+      "WebFetch(domain:www.datacamp.com)",
+      "Bash(npm init:*)",
+      "Bash(npm install:*)",
+      "Bash(mkdir:*)",
+      "Bash(npm test)",
+      "Bash(npm test:*)",
+      "Bash(npm test)",
+      "mcp__container-use__environment_open",
+      "mcp__container-use__environment_file_read",
+      "mcp__container-use__environment_file_list",
+      "mcp__container-use__environment_file_write",
+      "Bash(grep:*)",
+      "WebFetch(domain:hacker-news.firebaseio.com)",
+      "Bash(python3:*)",
+      "Bash(node:*)",
+      "Bash(mv:*)",
+      "Bash(rm:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
+    ],
+    "deny": []
+  }
+}
