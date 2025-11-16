@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Summarizer Extension Options</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+      padding: 20px;
+      max-width: 600px;
+      margin: 0 auto;
+      background: #f5f5f5;
+    }
+    
+    h1 {
+      color: #333;
+      font-size: 24px;
+      margin-bottom: 20px;
+    }
+    
+    .section {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      margin-bottom: 20px;
+    }
+    
+    .section h2 {
+      font-size: 18px;
+      color: #555;
+      margin-top: 0;
+      margin-bottom: 15px;
+    }
+    
+    .section p {
+      color: #666;
+      line-height: 1.6;
+      margin-bottom: 15px;
+    }
+    
+    button {
+      padding: 10px 20px;
+      background: #5C5CFF;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      transition: background 0.2s;
+    }
+    
+    button:hover {
+      background: #4646FF;
+    }
+    
+    button.danger {
+      background: #FF5C5C;
+    }
+    
+    button.danger:hover {
+      background: #FF4646;
+    }
+    
+    #status {
+      margin-top: 10px;
+      padding: 10px;
+      border-radius: 4px;
+      display: none;
+    }
+    
+    #status.success {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+    
+    #status.error {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+  </style>
+</head>
+<body>
+  <h1>Summarizer Extension Options</h1>
+  
+  <div class="section">
+    <h2>Cache Management</h2>
+    <p>
+      Summaries are cached to save API calls and improve performance. 
+      Cached summaries are automatically removed after 30 days.
+    </p>
+    <button id="clearAllBtn" class="danger">Clear All Cached Summaries</button>
+    <div id="status"></div>
+  </div>
+  
+  <div class="section">
+    <h2>About</h2>
+    <p>
+      This extension provides AI-powered summarization using OpenAI's o3 model for web pages and YouTube videos.
+    </p>
+    <p>
+      <strong>Storage Keys:</strong><br>
+      • YouTube: <code>summary:yt:{videoId}</code><br>
+      • Web pages: <code>summary:page:{url}</code>
+    </p>
+  </div>
+  
+  <script src="options.js"></script>
+</body>
+</html>

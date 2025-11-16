@@ -7,7 +7,7 @@ flowchart LR
   %% Subgraphs for clarity
   subgraph Browser[Chrome Browser]
     subgraph Extension[Chrome Extension MV3]
-      CJS[content.js<br/>Global Content Script]
+      CJS[content-dual.js<br/>Global Content Script]
       YTJS[youtube-content.js<br/>YouTube Content Script]
       BG[background.js<br/>Service Worker]
       UI[Overlay UI<br/>Dark Themed Panel]
@@ -56,7 +56,7 @@ flowchart LR
   YTJS -.->|append text| UI
 ```
 
-- content.js shows FABs, sends messages, and renders streaming results safely via textContent.
+- content-dual.js shows FABs, sends messages, and renders streaming results safely via textContent.
 - youtube-content.js detects video pages and initiates transcript summarization.
 - background.js orchestrates API calls (OpenAI o3, Claude) and native messaging to yt-summary.py.
 - yt-summary.py fetches transcripts with youtube-transcript-api and returns JSON over the native messaging protocol.

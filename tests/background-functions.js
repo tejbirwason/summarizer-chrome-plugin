@@ -12,7 +12,9 @@ ${backgroundSource}
 module.exports = {
   getSummary,
   getDraftResponse,
-  getVideoSummary
+  getDualSummary,
+  getSummaryMode,
+  getVideoTranscriptAndSummarize
 };
 `;
 

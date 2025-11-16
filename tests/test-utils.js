@@ -95,9 +95,73 @@ const waitFor = (callback, timeout = 1000) => {
   });
 };
 
+// Mock streaming response for Hetzner API (NDJSON format)
+function createHetznerStreamMock(text) {
+  const lines = [
+    `{"delta":"${text.slice(0, 10)}"}\n`,
+    `{"delta":"${text.slice(10, 20)}"}\n`,
+    `{"delta":"${text.slice(20)}"}\n`,
+    `{"done":true}\n`
+  ];
+
+  let index = 0;
+
+  return {
+    ok: true,
+    body: {
+      getReader: () => ({
+        read: jest.fn().mockImplementation(() => {
+          if (index < lines.length) {
+            const line = lines[index];
+            index++;
+            return Promise.resolve({
+              done: false,
+              value: new TextEncoder().encode(line)
+            });
+          }
+          return Promise.resolve({ done: true });
+        })
+      })
+    }
+  };
+}
+
+// Mock streaming response for Hetzner API (SSE format with data: prefix for dual mode)
+function createHetznerSSEStreamMock(text) {
+  const lines = [
+    `data: {"delta":"${text.slice(0, 10)}"}\n`,
+    `data: {"delta":"${text.slice(10, 20)}"}\n`,
+    `data: {"delta":"${text.slice(20)}"}\n`,
+    `data: [DONE]\n`
+  ];
+
+  let index = 0;
+
+  return {
+    ok: true,
+    body: {
+      getReader: () => ({
+        read: jest.fn().mockImplementation(() => {
+          if (index < lines.length) {
+            const line = lines[index];
+            index++;
+            return Promise.resolve({
+              done: false,
+              value: new TextEncoder().encode(line)
+            });
+          }
+          return Promise.resolve({ done: true });
+        })
+      })
+    }
+  };
+}
+
 module.exports = {
   createOpenAIStreamMock,
   createAnthropicStreamMock,
   createErrorResponse,
+  createHetznerStreamMock,
+  createHetznerSSEStreamMock,
   waitFor
 };

@@ -5,7 +5,8 @@ global.chrome = {
     onMessage: {
       addListener: jest.fn()
     },
-    sendNativeMessage: jest.fn()
+    sendNativeMessage: jest.fn(),
+    connectNative: jest.fn()
   },
   tabs: {
     sendMessage: jest.fn()

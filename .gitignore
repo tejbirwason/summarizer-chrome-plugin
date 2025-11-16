@@ -17,6 +17,8 @@ secrets.json
 *api-key*
 *secret*
 credentials/
+*cookies.txt
+youtube_cookies.txt
 
 # Build outputs
 dist/
@@ -55,3 +57,8 @@ coverage/
 # Package lock files (optional - some prefer to commit these)
 # package-lock.json
 # yarn.lock
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyc

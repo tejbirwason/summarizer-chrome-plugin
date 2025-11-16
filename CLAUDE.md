@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Chrome extension that provides AI-powered text summarization and response drafting capabilities. It integrates with OpenAI's o3 model for summarization and Claude for drafting responses. The extension also includes special YouTube video transcript summarization functionality via native messaging.
+Chrome extension providing AI-powered text summarization and response drafting. Features dual-mode summarization (fast + deep) via local Python handler using OpenAI models, Claude-powered response drafting, and YouTube video transcript summarization. All powered by native messaging architecture.
 
 ## Key Commands
 
@@ -24,83 +24,116 @@ npm run test:coverage
 ### Core Components
 
 1. **background.js** - Service worker that handles:
-   - OpenAI o3 API calls for summarization
    - Claude API calls for response drafting
-   - Native messaging for YouTube transcripts
+   - Native messaging orchestration (com.localai, com.ytsummary)
    - Streaming responses back to content scripts
+   - Message routing between content scripts and native hosts
 
-2. **content.js** - Main content script injected on all pages:
+2. **content-dual.js** - Main content script injected on all pages:
    - Creates floating action buttons (FABs) for summarize (✨) and draft (✒️)
    - Shows/hides buttons based on text selection
-   - Displays streaming results in a dark-themed overlay
+   - Displays dual-mode streaming results in dark-themed overlay
    - Handles user input for draft instructions
 
 3. **youtube-content.js** - YouTube-specific content script:
-   - Adds summarize button to YouTube video pages
-   - Integrates with native messaging host
+   - Adds "✨ Summarize" button to YouTube video pages
+   - Initiates dual-mode video summarization
 
-4. **yt-summary.py** - Native messaging host:
+4. **local-ai-handler.py** - Native messaging host for summarization:
+   - Dual-mode AI summarization (fast + deep)
+   - Uses OpenAI models (configurable via ai-config.json)
+   - Supports streaming responses
+   - Handles both text and transcript summarization
+
+5. **yt-summary.py** - Native messaging host for YouTube:
    - Fetches YouTube transcripts using youtube_transcript_api
-   - Communicates with extension via stdio protocol
+   - Communicates via stdio protocol
+   - Returns full transcript to background script
 
 ### Message Flow
 
-1. User selects text → FAB appears → User clicks FAB
-2. Content script sends message to background script
-3. Background script calls appropriate API (OpenAI/Claude)
-4. Streaming responses sent back to content script
-5. Content script updates UI in real-time
+**Text Summarization (Dual-Mode):**
+1. User selects text → FAB appears → User clicks ✨
+2. content-dual.js sends `summarizeSelection` to background.js
+3. background.js forwards to local-ai-handler.py via native messaging
+4. local-ai-handler.py generates fast summary (streams back)
+5. local-ai-handler.py generates deep summary (streams back)
+6. content-dual.js updates dual-mode overlay in real-time
 
-### YouTube Transcript Generation Flow
+**Response Drafting:**
+1. User selects text → clicks ✒️ → enters instructions
+2. content-dual.js sends `draftResponse` to background.js
+3. background.js calls Claude API directly
+4. Streaming response updates content-dual.js overlay
 
-1. **Button Creation**: When user navigates to YouTube video page, `youtube-content.js` detects the page change and adds a "✨ Summarize" button
-2. **User Clicks Button**: Button extracts video ID from URL and sends `summarizeVideo` message to background script
-3. **Native Messaging**: Background script sends video ID to Python native host (`yt-summary.py`) via Chrome's native messaging API
-4. **Transcript Fetching**: Python script uses `youtube_transcript_api` to fetch video transcript, concatenates all segments
-5. **Response Processing**: Native host sends transcript back using stdio protocol (4-byte length header + JSON payload)
-6. **AI Summarization**: Background script passes transcript to OpenAI o3 API for summarization
-7. **Streaming Display**: Summary streams back through background script to content script, updating UI in real-time
+**YouTube Summarization:**
+1. youtube-content.js adds button → user clicks
+2. yt-summary.py fetches transcript via native messaging
+3. Transcript sent to local-ai-handler.py for dual-mode summarization
+4. Results stream to youtube-content.js overlay
+
+### YouTube Transcript Summarization Flow
+
+1. **Button Creation**: youtube-content.js detects YouTube page, adds "✨ Summarize" button
+2. **User Clicks**: Extracts video ID, sends `summarizeVideo` to background.js
+3. **Transcript Fetching**: background.js → yt-summary.py (native messaging) → youtube_transcript_api
+4. **Transcript Return**: yt-summary.py returns full transcript via stdio protocol (4-byte length + JSON)
+5. **Dual-Mode Summarization**: background.js → local-ai-handler.py → generates fast + deep summaries
+6. **Streaming Display**: Summaries stream back to youtube-content.js, updating dual-mode overlay in real-time
 
 #### Native Messaging Setup Requirements
 
-1. **Install Native Host Manifest**: Copy `com.ytsummary.json` to Chrome's NativeMessagingHosts directory:
+1. **Install Native Host Manifests**: Copy both to Chrome's NativeMessagingHosts directory:
+   - `com.ytsummary.json` (YouTube transcripts)
+   - `com.localai.json` (dual-mode summarization)
    - macOS: `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/`
    - Linux: `~/.config/google-chrome/NativeMessagingHosts/`
    - Windows: Registry entry required
 
-2. **Python Dependencies**: Install `youtube-transcript-api` package:
+2. **Python Dependencies**:
    ```bash
-   pip install youtube-transcript-api
+   pip install -r requirements.txt
    ```
 
-3. **Path Configuration**: Ensure `yt-summary.py` path in manifest matches actual location and has execute permissions
+3. **Environment Setup**: Create `.env` with `OPENAI_API_KEY`
+
+4. **Path Configuration**: Ensure Python scripts are executable and paths in manifests match actual locations
+
+See `NATIVE_MESSAGING_SETUP.md` for detailed setup and troubleshooting.
 
 #### Native Messaging Protocol Details
 
 - Communication uses stdio (stdin/stdout) with 4-byte little-endian length prefix
-- Messages are JSON encoded: `{"video_id": "xxx"}` → `{"text": "transcript..."}`
-- Debug logs written to `/tmp/native-host-test.txt` for troubleshooting
+- Messages are JSON encoded
+- Debug logs:
+  - yt-summary.py → `/tmp/native-host-test.txt`
+  - local-ai-handler.py → `/tmp/local-ai-handler.log`
 - Error handling includes user-friendly messages with setup instructions
 
 ### Key Implementation Details
 
-- Uses Chrome Extension Manifest V3
-- Implements proper streaming for both OpenAI and Claude APIs
+- Chrome Extension Manifest V3
+- Dual-mode summarization (fast + deep) via native messaging
+- Streaming responses for all AI interactions
 - All UI updates use `textContent` to prevent XSS
-- Native messaging for YouTube functionality requires manual setup
-- Tests are comprehensive with mocked Chrome APIs
+- Native messaging requires manual setup (both hosts)
+- Configurable AI models via `ai-config.json`
+- Tests use Jest with jsdom and mocked Chrome APIs
 
 ## Security Notes
 
-- API keys are currently hardcoded in background.js (should be moved to secure storage)
+- API keys stored locally:
+  - Claude API key in `config.js` (gitignored)
+  - OpenAI API key in `.env` (gitignored)
 - Extension uses `anthropic-dangerous-direct-browser-access` header for Claude API
-- All user inputs are sanitized before display
+- All user inputs sanitized before display (textContent, no innerHTML)
+- Native messaging requires explicit manifest setup
 
 ## Testing
 
-The project includes unit and integration tests for all major components:
-- `tests/background.test.js` - API integration tests
-- `tests/content.test.js` - UI component tests  
-- `tests/integration.test.js` - End-to-end flow tests
+The project includes unit and integration tests for major components:
+- `tests/background.test.js` - Background script and API integration tests
+- `tests/dual-mode-integration.test.js` - Dual-mode summarization flow tests
+- `tests/dual-mode-ui.test.js` - Dual-mode UI component tests
 
 Tests use Jest with jsdom environment and comprehensive Chrome API mocks.

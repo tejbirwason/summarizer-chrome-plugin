@@ -4,7 +4,7 @@ module.exports = {
   testMatch: ['<rootDir>/tests/**/*.test.js'],
   collectCoverageFrom: [
     'background.js',
-    'content.js',
+    'content-dual.js',
     '!youtube-content.js',
     '!node_modules/**'
   ],

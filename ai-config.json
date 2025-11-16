@@ -1,0 +1,18 @@
+{
+  "models": {
+    "fast": "gpt-5.1",
+    "deep": "gpt-5.1"
+  },
+  "reasoning": {
+    "fast": "none",
+    "deep": "high"
+  },
+  "verbosity": {
+    "fast": "low",
+    "deep": "low"
+  },
+  "prompts": {
+    "fast": "Summarize concisely. Format your response using markdown:\n\n",
+    "deep": "Extract key insights, but be extremely concise. Start with a TLDR. Format your response using markdown:\n\n"
+  }
+}

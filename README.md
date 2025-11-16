@@ -1,55 +1,68 @@
 # Summarize & Draft Chrome Extension
 
-A Chrome extension that provides AI-powered text summarization (using OpenAI's o3 model) and response drafting (using Claude) capabilities. Also includes YouTube video transcript summarization.
+A Chrome extension that provides AI-powered text summarization and response drafting capabilities. Features dual-mode summaries (fast + deep) via local AI handler, Claude-powered response drafting, and YouTube video transcript summarization.
 
 ## Features
 
-- **Text Summarization**: Select any text on a webpage and click the ✨ button to get an AI summary
-- **Response Drafting**: Click the ✒️ button to draft a response based on selected text
+- **Dual-Mode Summarization**: Select text and get both fast and deep summaries simultaneously
+- **Response Drafting**: Click the ✒️ button to draft responses using Claude
 - **YouTube Summarization**: Automatically adds a "Summarize" button to YouTube videos
 - **Streaming Responses**: See results as they're generated in real-time
+- **Configurable AI Models**: Customize models, reasoning levels, and prompts via `ai-config.json`
 
 ## Installation
 
 1. Clone this repository
 2. **Set up API keys**:
-   - Copy `config.example.js` to `config.js`: `cp config.example.js config.js`
-   - Edit `config.js` and add your API keys:
-     - Replace `'your-openai-api-key-here'` with your OpenAI API key
-     - Replace `'your-anthropic-api-key-here'` with your Anthropic API key
-   - The `config.js` file is gitignored and won't be committed
-3. Open Chrome and navigate to `chrome://extensions/`
-4. Enable "Developer mode" in the top right
-5. Click "Load unpacked" and select the extension directory
-
-### YouTube Summarization Setup (Optional)
-
-To enable YouTube video summarization:
-
-1. Install Python dependencies:
+   - For extension (Claude API):
+     - Copy `config.example.js` to `config.js`: `cp config.example.js config.js`
+     - Edit `config.js` and add your Anthropic API key
+   - For local AI handler (summarization):
+     - Copy `.env.example` to `.env`: `cp .env.example .env`
+     - Edit `.env` and add your OpenAI API key
+   - Both files are gitignored and won't be committed
+3. Install Python dependencies:
    ```bash
-   pip3 install youtube-transcript-api
+   pip3 install -r requirements.txt
    ```
+4. Open Chrome and navigate to `chrome://extensions/`
+5. Enable "Developer mode" in the top right
+6. Click "Load unpacked" and select the extension directory
 
-2. Update the native messaging manifest:
-   - Edit `com.ytsummary.json` with your extension ID (found in chrome://extensions)
-   - Copy it to Chrome's native messaging directory:
+### Native Messaging Setup (Required for summarization)
+
+To enable text summarization and YouTube video summarization:
+
+1. Copy native messaging manifests to Chrome's directory:
    ```bash
    cp com.ytsummary.json ~/Library/Application\ Support/Google/Chrome/NativeMessagingHosts/
+   cp com.localai.json ~/Library/Application\ Support/Google/Chrome/NativeMessagingHosts/
    ```
+
+2. Update extension IDs in manifests if needed (get ID from chrome://extensions)
+
+3. Make Python scripts executable:
+   ```bash
+   chmod +x yt-summary.py local-ai-handler.py
+   ```
+
+4. Restart Chrome completely
+
+See `NATIVE_MESSAGING_SETUP.md` for detailed troubleshooting.
 
 ## Usage
 
-1. **Text Summarization**: Select text on any webpage → Click ✨ floating button
+1. **Text Summarization**: Select text on any webpage → Click ✨ floating button → See dual-mode results (fast + deep)
 2. **Response Drafting**: Select text → Click ✒️ button → Enter instructions → Press Enter
-3. **YouTube Videos**: Navigate to a YouTube video → Click "Summarize" button (top-right)
+3. **YouTube Videos**: Navigate to a YouTube video → Click "✨ Summarize" button → Get dual-mode video summary
+4. **Configure AI**: Edit `ai-config.json` to customize models, reasoning levels, and prompts (see `AI_CONFIG_README.md`)
 
 ## Security Notes
 
-- **API keys are stored locally**: Your API keys are stored in `config.js` which is gitignored
-- The `.gitignore` file prevents `config.js` from being committed to the repository
+- **API keys are stored locally**: API keys are in `config.js` (Claude) and `.env` (OpenAI)
+- Both files are gitignored and won't be committed to the repository
 - Never commit real API keys to version control
-- For enhanced security, consider using Chrome storage API for production deployments
+- For production, consider using secure key management services
 
 ## Development
 
@@ -61,11 +74,14 @@ npm run test:coverage   # Run tests with coverage report
 ```
 
 ### Project Structure
-- `background.js` - Service worker handling API calls
-- `config.js` - API keys configuration (create from config.example.js)
-- `content.js` - Main content script for text selection
-- `youtube-content.js` - YouTube-specific functionality
-- `yt-summary.py` - Native messaging host for YouTube transcripts
+- `background.js` - Service worker handling Claude API and native messaging orchestration
+- `content-dual.js` - Main content script with dual-mode UI overlay and FABs
+- `youtube-content.js` - YouTube-specific button and functionality
+- `local-ai-handler.py` - Native messaging host for dual-mode summarization (fast + deep)
+- `yt-summary.py` - Native messaging host for YouTube transcript fetching
+- `ai-config.json` - AI model configuration (models, reasoning, prompts)
+- `config.js` - Claude API key (create from config.example.js)
+- `.env` - OpenAI API key (create from .env.example)
 - `manifest.json` - Extension configuration
 
 ## Contributing

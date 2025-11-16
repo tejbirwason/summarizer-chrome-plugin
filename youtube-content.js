@@ -68,7 +68,7 @@ function createSummaryButton() {
     spinner.style.display = 'inline-block';
     button.disabled = true;
     button.style.opacity = '0.7';
-    
+
     // Update button text while loading
     const textNode = button.childNodes[1];
     if (textNode) textNode.textContent = ' Summarizing Video...';
@@ -82,16 +82,19 @@ function createSummaryButton() {
   // Add button to the page body (since it's fixed position)
   document.body.appendChild(button);
 
-  // Listen for summary completion
+  // Listen for summary completion (both old and new dual-mode messages)
   chrome.runtime.onMessage.addListener((request) => {
     if (
       request.action === 'displaySummary' ||
-      request.action === 'updateSummary'
+      request.action === 'updateSummary' ||
+      request.action === 'updateFastSummary' ||
+      request.action === 'updateDeepSummary' ||
+      request.action === 'summaryError'
     ) {
       spinner.style.display = 'none';
       button.disabled = false;
       button.style.opacity = '1';
-      
+
       // Reset button text
       const textNode = button.childNodes[1];
       if (textNode) textNode.textContent = ' Summarize';
