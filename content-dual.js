@@ -1,506 +1,411 @@
-// content-dual.js - Dual-mode (Fast/Deep) streaming UI
+// content-dual.js - Config-driven multi-model streaming UI with persistence
 
-// Check if already initialized to prevent duplicate injection
+// Check if already initialized
 if (typeof window.claudeSummarizerInitialized === 'undefined') {
   window.claudeSummarizerInitialized = true;
 
-  // State management
-  let activeTab = 'fast'; // 'fast' or 'deep'
-  let fastSummary = '';
-  let deepSummary = '';
-  let deepInProgress = false;
-  let deepComplete = false;
-  let currentConversationId = null;
-  let conversationHistory = [];
-  let currentTranscript = null;
-  let originalText = null; // Store original text for regeneration
-  let waitingForFirstToken = false; // Track if we're waiting to show panel
+  // Quota limits
+  const QUOTA = {
+    MAX_MESSAGES_PER_MODEL: 20,
+    MAX_CHARS_PER_MESSAGE: 50000,
+    MAX_ORIGINAL_TEXT_CHARS: 100000,
+    MAX_SESSIONS: 50
+  };
 
-  // Inject markdown CSS styles once
+  // State management
+  const state = {
+    config: null,
+    activeTab: null,
+    models: {},
+    transcript: null,
+    originalText: null,
+    waitingForFirstToken: false
+  };
+
+  // Storage key - normalized URL
+  function getStorageKey() {
+    const url = new URL(location.href);
+    return `session:${url.origin}${url.pathname}`;
+  }
+
+  // Format timestamp as relative time
+  function formatAge(timestamp) {
+    const ageMs = Date.now() - timestamp;
+    const hours = Math.floor(ageMs / (1000 * 60 * 60));
+    if (hours < 1) return 'just now';
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ago`;
+  }
+
+  // Inject markdown CSS styles
   function injectMarkdownStyles() {
     if (document.getElementById('claude-markdown-styles')) return;
 
     const style = document.createElement('style');
     style.id = 'claude-markdown-styles';
     style.textContent = `
-      .markdown-content h1,
-      .markdown-content h2,
-      .markdown-content h3,
-      .markdown-content h4,
-      .markdown-content h5,
-      .markdown-content h6 {
-        margin-top: 16px;
-        margin-bottom: 8px;
-        font-weight: 600;
-        line-height: 1.25;
-        color: #e0e0e0;
+      .markdown-content h1, .markdown-content h2, .markdown-content h3,
+      .markdown-content h4, .markdown-content h5, .markdown-content h6 {
+        margin-top: 16px; margin-bottom: 8px; font-weight: 600; line-height: 1.25; color: #e0e0e0;
       }
-
       .markdown-content h1 { font-size: 1.8em; border-bottom: 1px solid #444; padding-bottom: 4px; }
       .markdown-content h2 { font-size: 1.5em; border-bottom: 1px solid #444; padding-bottom: 4px; }
       .markdown-content h3 { font-size: 1.25em; }
-      .markdown-content h4 { font-size: 1.1em; }
-
-      .markdown-content p {
-        margin-top: 0;
-        margin-bottom: 12px;
-      }
-
-      .markdown-content ul,
-      .markdown-content ol {
-        margin-top: 0;
-        margin-bottom: 12px;
-        padding-left: 24px;
-      }
-
-      .markdown-content li {
-        margin-bottom: 4px;
-      }
-
-      .markdown-content code {
-        background: #3a3a3a;
-        padding: 2px 6px;
-        border-radius: 3px;
-        font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
-        font-size: 0.9em;
-        color: #ff79c6;
-      }
-
-      .markdown-content pre {
-        background: #2a2a2a;
-        border: 1px solid #444;
-        border-radius: 6px;
-        padding: 12px;
-        overflow-x: auto;
-        margin-bottom: 12px;
-      }
-
-      .markdown-content pre code {
-        background: none;
-        padding: 0;
-        color: #e0e0e0;
-      }
-
-      .markdown-content blockquote {
-        border-left: 3px solid #5C5CFF;
-        margin: 12px 0;
-        padding-left: 12px;
-        color: #b0b0b0;
-        font-style: italic;
-      }
-
-      .markdown-content a {
-        color: #5C5CFF;
-        text-decoration: none;
-      }
-
-      .markdown-content a:hover {
-        text-decoration: underline;
-      }
-
-      .markdown-content strong {
-        font-weight: 600;
-        color: #f0f0f0;
-      }
-
-      .markdown-content em {
-        font-style: italic;
-      }
-
-      .markdown-content hr {
-        border: none;
-        border-top: 1px solid #444;
-        margin: 16px 0;
-      }
-
-      .markdown-content table {
-        border-collapse: collapse;
-        width: 100%;
-        margin-bottom: 12px;
-      }
-
-      .markdown-content th,
-      .markdown-content td {
-        border: 1px solid #444;
-        padding: 6px 10px;
-        text-align: left;
-      }
-
-      .markdown-content th {
-        background: #3a3a3a;
-        font-weight: 600;
-      }
+      .markdown-content p { margin-top: 0; margin-bottom: 12px; }
+      .markdown-content ul, .markdown-content ol { margin-top: 0; margin-bottom: 12px; padding-left: 24px; }
+      .markdown-content li { margin-bottom: 4px; }
+      .markdown-content code { background: #3a3a3a; padding: 2px 6px; border-radius: 3px; font-family: monospace; font-size: 0.9em; color: #ff79c6; }
+      .markdown-content pre { background: #2a2a2a; border: 1px solid #444; border-radius: 6px; padding: 12px; overflow-x: auto; margin-bottom: 12px; }
+      .markdown-content pre code { background: none; padding: 0; color: #e0e0e0; }
+      .markdown-content blockquote { border-left: 3px solid #5C5CFF; margin: 12px 0; padding-left: 12px; color: #b0b0b0; font-style: italic; }
+      .markdown-content a { color: #5C5CFF; text-decoration: none; }
+      .markdown-content strong { font-weight: 600; color: #f0f0f0; }
+      .markdown-content hr { border: none; border-top: 1px solid #444; margin: 16px 0; }
+      .followup-trigger { color: #5C5CFF; cursor: pointer; font-size: 13px; margin-top: 16px; display: inline-block; }
+      .followup-trigger:hover { text-decoration: underline; }
+      .followup-inline { display: flex; gap: 8px; margin-top: 12px; }
+      .followup-inline input { flex: 1; padding: 8px 12px; background: #2a2a2a; border: 1px solid #444; border-radius: 4px; color: #e0e0e0; font-size: 14px; }
+      .followup-inline input:focus { outline: none; border-color: #5C5CFF; }
+      .followup-inline button { padding: 8px 12px; background: #5C5CFF; border: none; border-radius: 4px; color: white; cursor: pointer; font-size: 14px; }
+      .followup-inline button:hover { background: #4646FF; }
+      #resume-banner { position: fixed; bottom: 20px; right: 20px; background: #2a2a2a; color: #e0e0e0; padding: 12px 16px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.3); z-index: 10001; display: flex; align-items: center; gap: 12px; font-size: 14px; }
+      #resume-banner button { padding: 6px 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; }
+      #resume-btn { background: #5C5CFF; color: white; }
+      #dismiss-btn { background: transparent; color: #888; }
     `;
     document.head.appendChild(style);
   }
 
-  // Markdown rendering with XSS protection
+  // Render markdown with XSS protection
   function renderMarkdown(text) {
     if (!text) return '';
-
-    // Inject styles on first render
     injectMarkdownStyles();
-
-    // Check if marked and DOMPurify are available
-    if (typeof marked === 'undefined' || typeof DOMPurify === 'undefined') {
-      console.warn('Markdown libraries not loaded, falling back to plain text');
-      return text;
-    }
-
+    if (typeof marked === 'undefined' || typeof DOMPurify === 'undefined') return text;
     try {
-      // Parse markdown to HTML
-      const rawHtml = marked.parse(text);
-      // Sanitize to prevent XSS
-      return DOMPurify.sanitize(rawHtml);
-    } catch (error) {
-      console.error('Error rendering markdown:', error);
+      return DOMPurify.sanitize(marked.parse(text));
+    } catch (e) {
       return text;
     }
   }
 
+  // Play completion sound
+  function playCompletionSound() {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const playNote = (freq, start, dur) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = freq;
+        osc.type = 'sine';
+        gain.gain.setValueAtTime(0.3, start);
+        gain.gain.exponentialRampToValueAtTime(0.01, start + dur);
+        osc.start(start);
+        osc.stop(start + dur);
+      };
+      const now = ctx.currentTime;
+      playNote(523.25, now, 0.15);
+      playNote(659.25, now + 0.15, 0.2);
+    } catch (e) {}
+  }
+
+  // Initialize state for models from config
+  function initModelsState(config) {
+    state.config = config;
+    state.activeTab = config.models[0].id;
+    state.models = {};
+    config.models.forEach(m => {
+      state.models[m.id] = {
+        messages: [],
+        content: '',
+        inProgress: false,
+        complete: false,
+        duration: null
+      };
+    });
+  }
+
+  // Reset state
+  function resetState() {
+    if (state.config) {
+      state.config.models.forEach(m => {
+        state.models[m.id] = {
+          messages: [],
+          content: '',
+          inProgress: false,
+          complete: false,
+          duration: null
+        };
+      });
+    }
+    state.transcript = null;
+    state.originalText = null;
+    state.waitingForFirstToken = false;
+  }
+
+  // Create dynamic tabs from config
+  function createTabs(tabBar) {
+    state.config.models.forEach(model => {
+      const tab = document.createElement('button');
+      tab.id = `${model.id}-tab`;
+      tab.innerHTML = model.icon;
+      tab.title = model.name;
+      tab.style.cssText = `
+        flex: 1; padding: 10px; background: ${state.activeTab === model.id ? '#2a2a2a' : 'transparent'};
+        color: #e0e0e0; border: none; border-bottom: 2px solid ${state.activeTab === model.id ? '#5C5CFF' : 'transparent'};
+        cursor: pointer; font-size: 20px; transition: all 0.2s; position: relative;
+      `;
+      tab.onclick = () => switchTab(model.id);
+
+      // Status badge
+      const badge = document.createElement('span');
+      badge.id = `${model.id}-badge`;
+      badge.innerHTML = '•';
+      badge.style.cssText = `
+        position: absolute; top: 5px; right: 5px; font-size: 20px; display: none;
+        color: ${state.models[model.id]?.inProgress ? '#FFC107' : '#50C550'};
+      `;
+      tab.appendChild(badge);
+      tabBar.appendChild(tab);
+    });
+  }
+
+  // Switch active tab
+  function switchTab(tabId) {
+    state.activeTab = tabId;
+
+    state.config.models.forEach(model => {
+      const tab = document.getElementById(`${model.id}-tab`);
+      const content = document.getElementById(`${model.id}-content`);
+      if (tab) {
+        tab.style.background = model.id === tabId ? '#2a2a2a' : 'transparent';
+        tab.style.borderBottom = `2px solid ${model.id === tabId ? '#5C5CFF' : 'transparent'}`;
+      }
+      if (content) {
+        content.style.display = model.id === tabId ? 'block' : 'none';
+      }
+
+      // Hide badge for active complete tab
+      const badge = document.getElementById(`${model.id}-badge`);
+      if (badge && model.id === tabId && state.models[model.id]?.complete) {
+        badge.style.display = 'none';
+      }
+    });
+
+    updateContentDisplay();
+  }
+
+  // Update badge for a model
+  function updateBadge(modelId) {
+    const badge = document.getElementById(`${modelId}-badge`);
+    if (!badge) return;
+
+    const modelState = state.models[modelId];
+    if (modelState.inProgress) {
+      badge.style.color = '#FFC107';
+      badge.style.display = modelId !== state.activeTab ? 'block' : 'none';
+    } else if (modelState.complete) {
+      badge.style.color = '#50C550';
+      badge.style.display = modelId !== state.activeTab ? 'block' : 'none';
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+
+  // Update content display for active tab
+  function updateContentDisplay() {
+    const modelId = state.activeTab;
+    const modelState = state.models[modelId];
+    const contentEl = document.getElementById(`${modelId}-content`);
+    if (!contentEl || !modelState) return;
+
+    contentEl.innerHTML = renderMarkdown(modelState.content) || '<div style="color: #888; padding: 20px; text-align: center;">Loading...</div>';
+
+    // Add "Ask about this..." link if complete and not already showing input
+    if (modelState.complete && !modelState.inProgress) {
+      const existingTrigger = contentEl.querySelector('.followup-trigger');
+      const existingInline = contentEl.querySelector('.followup-inline');
+      if (!existingTrigger && !existingInline) {
+        const trigger = document.createElement('div');
+        trigger.className = 'followup-trigger';
+        trigger.textContent = '💬 Ask about this...';
+        trigger.onclick = () => showInlineFollowup(modelId, contentEl, trigger);
+        contentEl.appendChild(trigger);
+      }
+    }
+  }
+
+  // Show inline followup input
+  function showInlineFollowup(modelId, contentEl, trigger) {
+    trigger.remove();
+
+    const container = document.createElement('div');
+    container.className = 'followup-inline';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = 'Ask a follow-up...';
+    input.onkeydown = (e) => { if (e.key === 'Enter') sendFollowupFrom(modelId, input, container); };
+
+    const btn = document.createElement('button');
+    btn.textContent = '➤';
+    btn.onclick = () => sendFollowupFrom(modelId, input, container);
+
+    container.appendChild(input);
+    container.appendChild(btn);
+    contentEl.appendChild(container);
+    input.focus();
+  }
+
+  // Send followup from inline input
+  function sendFollowupFrom(modelId, input, container) {
+    const question = input?.value?.trim();
+    if (!question) return;
+
+    container.remove();
+
+    const modelState = state.models[modelId];
+    modelState.messages.push({ role: 'user', content: question });
+    modelState.content += `\n\n---\n\n**You:** ${question}\n\n**Assistant:** `;
+    modelState.inProgress = true;
+    modelState.complete = false;
+    updateBadge(modelId);
+    updateContentDisplay();
+
+    chrome.runtime.sendMessage({
+      action: 'followup',
+      modelId: modelId,
+      messages: modelState.messages
+    });
+  }
+
+  // Create the main panel
   function createDualTabPanel() {
     let container = document.getElementById('claude-summary-container');
-    if (container) {
-      container.remove();
-    }
+    if (container) container.remove();
 
     container = document.createElement('div');
     container.id = 'claude-summary-container';
     container.style.cssText = `
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      width: 400px;
-      max-height: 85vh;
-      background: #1e1e1e;
-      color: #e0e0e0;
-      padding: 0;
-      border-radius: 8px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.3);
-      z-index: 10000;
-      font-size: 16px;
-      line-height: 1.6;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      display: flex;
-      flex-direction: column;
+      position: fixed; top: 20px; right: 20px; width: 420px; max-height: 85vh;
+      background: #1e1e1e; color: #e0e0e0; padding: 0; border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.3); z-index: 10000; font-size: 16px;
+      line-height: 1.6; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex; flex-direction: column;
     `;
 
     // Drag handle
     const dragHandle = document.createElement('div');
-    dragHandle.id = 'drag-handle';
     dragHandle.style.cssText = `
-      height: 35px;
-      background: #2a2a2a;
-      border-radius: 8px 8px 0 0;
-      cursor: move;
-      display: flex;
-      align-items: center;
-      padding: 0 15px;
-      flex-shrink: 0;
+      height: 35px; background: #2a2a2a; border-radius: 8px 8px 0 0; cursor: move;
+      display: flex; align-items: center; padding: 0 15px; flex-shrink: 0;
     `;
 
-    // Make draggable
-    let isDragging = false;
-    let dragStartX = 0, dragStartY = 0, elementStartX = 0, elementStartY = 0;
-
+    let isDragging = false, dragStartX = 0, dragStartY = 0, elementStartX = 0, elementStartY = 0;
     dragHandle.addEventListener('mousedown', (e) => {
       if (e.target.tagName === 'BUTTON') return;
       isDragging = true;
-      dragStartX = e.clientX;
-      dragStartY = e.clientY;
+      dragStartX = e.clientX; dragStartY = e.clientY;
       const rect = container.getBoundingClientRect();
-      elementStartX = rect.left;
-      elementStartY = rect.top;
+      elementStartX = rect.left; elementStartY = rect.top;
       e.preventDefault();
     });
-
     document.addEventListener('mousemove', (e) => {
       if (!isDragging) return;
-      const deltaX = e.clientX - dragStartX;
-      const deltaY = e.clientY - dragStartY;
-      container.style.left = `${elementStartX + deltaX}px`;
-      container.style.top = `${elementStartY + deltaY}px`;
+      container.style.left = `${elementStartX + e.clientX - dragStartX}px`;
+      container.style.top = `${elementStartY + e.clientY - dragStartY}px`;
       container.style.right = 'auto';
     });
-
-    document.addEventListener('mouseup', () => {
-      isDragging = false;
-    });
+    document.addEventListener('mouseup', () => isDragging = false);
 
     // Title
-    const titleLabel = document.createElement('span');
-    titleLabel.textContent = 'AI Summary';
-    titleLabel.style.cssText = `
-      color: #e0e0e0;
-      font-size: 14px;
-      font-weight: 500;
-    `;
-    dragHandle.appendChild(titleLabel);
+    const title = document.createElement('span');
+    title.textContent = 'AI Summary';
+    title.style.cssText = 'color: #e0e0e0; font-size: 14px; font-weight: 500;';
+    dragHandle.appendChild(title);
 
     // Header buttons
-    const headerButtons = document.createElement('div');
-    headerButtons.style.cssText = `
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-left: auto;
-    `;
+    const headerBtns = document.createElement('div');
+    headerBtns.style.cssText = 'display: flex; align-items: center; gap: 8px; margin-left: auto;';
 
-    // Copy transcript button
-    const copyTranscriptButton = document.createElement('button');
-    copyTranscriptButton.id = 'copy-transcript-btn';
-    copyTranscriptButton.innerHTML = '📄';
-    copyTranscriptButton.title = 'Copy full transcript';
-    copyTranscriptButton.style.cssText = `
-      border: none;
-      background: none;
-      font-size: 16px;
-      cursor: pointer;
-      color: #e0e0e0;
-      padding: 4px 8px;
-      display: ${currentTranscript ? 'flex' : 'none'};
-      align-items: center;
-      justify-content: center;
-      border-radius: 4px;
-      transition: background 0.2s;
+    // Copy text/transcript button (always visible)
+    const copyBtn = document.createElement('button');
+    copyBtn.id = 'copy-text-btn';
+    copyBtn.innerHTML = '📄';
+    copyBtn.title = state.transcript ? 'Copy transcript' : 'Copy text';
+    copyBtn.style.cssText = `
+      border: none; background: none; font-size: 16px; cursor: pointer; color: #e0e0e0;
+      padding: 4px 8px; display: flex; border-radius: 4px;
     `;
-    copyTranscriptButton.onmouseover = () => copyTranscriptButton.style.background = 'rgba(255, 255, 255, 0.1)';
-    copyTranscriptButton.onmouseout = () => copyTranscriptButton.style.background = 'none';
-    copyTranscriptButton.onclick = () => {
-      if (currentTranscript) {
-        navigator.clipboard.writeText(currentTranscript).then(() => {
-          copyTranscriptButton.innerHTML = '✓';
-          copyTranscriptButton.style.color = '#50C550';
-          setTimeout(() => {
-            copyTranscriptButton.innerHTML = '📄';
-            copyTranscriptButton.style.color = '#e0e0e0';
-          }, 1500);
+    copyBtn.onclick = () => {
+      const textToCopy = state.transcript || state.originalText;
+      if (textToCopy) {
+        navigator.clipboard.writeText(textToCopy).then(() => {
+          copyBtn.innerHTML = '✓';
+          setTimeout(() => copyBtn.innerHTML = '📄', 1500);
         });
       }
     };
 
-    // Reset button (clears cache and re-triggers summary)
-    const resetButton = document.createElement('button');
-    resetButton.innerHTML = '🔄';
-    resetButton.title = 'Reset and regenerate summary';
-    resetButton.style.cssText = `
-      border: none;
-      background: none;
-      font-size: 16px;
-      cursor: pointer;
-      color: #e0e0e0;
-      padding: 4px 8px;
-      border-radius: 4px;
-      transition: background 0.2s;
-    `;
-    resetButton.onmouseover = () => resetButton.style.background = 'rgba(92, 92, 255, 0.2)';
-    resetButton.onmouseout = () => resetButton.style.background = 'none';
-    resetButton.onclick = () => {
-      if (!originalText) {
-        alert('No original text available to regenerate. Please select text and summarize again.');
-        return;
-      }
-
-      // Show loading state
-      resetButton.disabled = true;
-      resetButton.innerHTML = '⏳';
-      resetButton.style.cursor = 'wait';
-
-      // Clear the content areas
-      const fastContent = document.getElementById('fast-content');
-      const deepContent = document.getElementById('deep-content');
-      if (fastContent) {
-        fastContent.innerHTML = '<div style="color: #888; text-align: center; padding: 20px;">Regenerating summary...</div>';
-      }
-      if (deepContent) {
-        deepContent.innerHTML = '';
-      }
-
-      // Reset state and start fresh
+    // Reset button
+    const resetBtn = document.createElement('button');
+    resetBtn.innerHTML = '🔄';
+    resetBtn.title = 'Regenerate';
+    resetBtn.style.cssText = 'border: none; background: none; font-size: 16px; cursor: pointer; color: #e0e0e0; padding: 4px 8px; border-radius: 4px;';
+    resetBtn.onclick = () => {
+      if (!state.originalText) return;
       resetState();
-      deepInProgress = true;
-
-      // Re-trigger the summarization with the original text
-      chrome.runtime.sendMessage({
-        action: 'summarizeDual',
-        text: originalText,
+      state.config.models.forEach(m => {
+        state.models[m.id].inProgress = true;
+        updateBadge(m.id);
       });
+      state.waitingForFirstToken = true;
+      chrome.runtime.sendMessage({ action: 'summarizeDual', text: state.originalText });
     };
 
     // Close button
-    const closeButton = document.createElement('button');
-    closeButton.innerHTML = '×';
-    closeButton.style.cssText = `
-      border: none;
-      background: none;
-      font-size: 20px;
-      cursor: pointer;
-      color: #e0e0e0;
-      padding: 0;
-      width: 25px;
-      height: 25px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border-radius: 4px;
-      transition: background 0.2s;
-    `;
-    closeButton.onmouseover = () => closeButton.style.background = 'rgba(255, 255, 255, 0.1)';
-    closeButton.onmouseout = () => closeButton.style.background = 'none';
-    closeButton.onclick = () => {
-      // Cancel any in-progress deep analysis
-      if (deepInProgress) {
-        chrome.runtime.sendMessage({ action: 'cancelDeepAnalysis' });
-      }
+    const closeBtn = document.createElement('button');
+    closeBtn.innerHTML = '×';
+    closeBtn.style.cssText = 'border: none; background: none; font-size: 20px; cursor: pointer; color: #e0e0e0; padding: 0; width: 25px; height: 25px; border-radius: 4px;';
+    closeBtn.onclick = () => {
       container.remove();
       resetState();
     };
 
-    headerButtons.appendChild(copyTranscriptButton);
-    headerButtons.appendChild(resetButton);
-    headerButtons.appendChild(closeButton);
-    dragHandle.appendChild(headerButtons);
+    headerBtns.appendChild(copyBtn);
+    headerBtns.appendChild(resetBtn);
+    headerBtns.appendChild(closeBtn);
+    dragHandle.appendChild(headerBtns);
 
     // Tab bar
     const tabBar = document.createElement('div');
-    tabBar.id = 'tab-bar';
-    tabBar.style.cssText = `
-      display: flex;
-      gap: 0;
-      padding: 10px 15px 0 15px;
-      background: #1e1e1e;
-      border-bottom: 1px solid #444;
-      flex-shrink: 0;
-    `;
-
-    // Fast tab
-    const fastTab = document.createElement('button');
-    fastTab.id = 'fast-tab';
-    fastTab.innerHTML = '⚡';
-    fastTab.title = 'Fast (3-5s)';
-    fastTab.style.cssText = `
-      flex: 1;
-      padding: 10px;
-      background: ${activeTab === 'fast' ? '#2a2a2a' : 'transparent'};
-      color: #e0e0e0;
-      border: none;
-      border-bottom: 2px solid ${activeTab === 'fast' ? '#5C5CFF' : 'transparent'};
-      cursor: pointer;
-      font-size: 20px;
-      font-weight: 500;
-      transition: all 0.2s;
-      position: relative;
-    `;
-    fastTab.onclick = () => switchTab('fast');
-
-    // Deep tab
-    const deepTab = document.createElement('button');
-    deepTab.id = 'deep-tab';
-    deepTab.innerHTML = '🧠';
-    deepTab.title = 'Deep (30-60s)';
-    deepTab.style.cssText = `
-      flex: 1;
-      padding: 10px;
-      background: ${activeTab === 'deep' ? '#2a2a2a' : 'transparent'};
-      color: #e0e0e0;
-      border: none;
-      border-bottom: 2px solid ${activeTab === 'deep' ? '#5C5CFF' : 'transparent'};
-      cursor: pointer;
-      font-size: 20px;
-      font-weight: 500;
-      transition: all 0.2s;
-      position: relative;
-    `;
-    deepTab.onclick = () => switchTab('deep');
-
-    // Badge for deep tab status indicator
-    const deepBadge = document.createElement('span');
-    deepBadge.id = 'deep-badge';
-    deepBadge.innerHTML = '•';
-    deepBadge.style.cssText = `
-      position: absolute;
-      top: 5px;
-      right: 5px;
-      color: ${deepInProgress ? '#FFC107' : (deepComplete ? '#50C550' : '#FFC107')};
-      font-size: 20px;
-      display: ${deepInProgress || deepComplete ? 'block' : 'none'};
-    `;
-    deepTab.appendChild(deepBadge);
-
-    tabBar.appendChild(fastTab);
-    tabBar.appendChild(deepTab);
+    tabBar.style.cssText = 'display: flex; gap: 0; padding: 10px 15px 0 15px; background: #1e1e1e; border-bottom: 1px solid #444; flex-shrink: 0;';
+    createTabs(tabBar);
 
     // Content area
     const contentArea = document.createElement('div');
-    contentArea.id = 'content-area';
-    contentArea.style.cssText = `
-      flex: 1;
-      overflow-y: auto;
-      padding: 20px;
-      min-height: 200px;
-      scrollbar-width: thin;
-      scrollbar-color: #3a3a3a #1e1e1e;
-    `;
+    contentArea.style.cssText = 'flex: 1; overflow-y: auto; padding: 20px; min-height: 200px;';
 
-    // Add webkit scrollbar styles for Chrome/Safari
-    const scrollbarStyle = document.createElement('style');
-    if (!document.getElementById('dual-scrollbar-styles')) {
-      scrollbarStyle.id = 'dual-scrollbar-styles';
-      scrollbarStyle.textContent = `
-        #content-area::-webkit-scrollbar {
-          width: 8px;
-        }
-        #content-area::-webkit-scrollbar-track {
-          background: #1e1e1e;
-        }
-        #content-area::-webkit-scrollbar-thumb {
-          background: #3a3a3a;
-          border-radius: 4px;
-        }
-        #content-area::-webkit-scrollbar-thumb:hover {
-          background: #4a4a4a;
-        }
-      `;
-      document.head.appendChild(scrollbarStyle);
-    }
+    // Create content divs for each model
+    state.config.models.forEach(model => {
+      const contentDiv = document.createElement('div');
+      contentDiv.id = `${model.id}-content`;
+      contentDiv.className = 'markdown-content';
+      contentDiv.style.cssText = `display: ${model.id === state.activeTab ? 'block' : 'none'}; white-space: normal; line-height: 1.6; padding: 4px;`;
 
-    // Fast content
-    const fastContent = document.createElement('div');
-    fastContent.id = 'fast-content';
-    fastContent.style.cssText = `
-      display: ${activeTab === 'fast' ? 'block' : 'none'};
-      white-space: normal;
-      line-height: 1.6;
-      padding: 4px;
-    `;
-    // Add markdown styling
-    fastContent.className = 'markdown-content';
-    fastContent.innerHTML = renderMarkdown(fastSummary) || 'Loading...';
+      const modelState = state.models[model.id];
+      if (modelState.inProgress && !modelState.content) {
+        contentDiv.innerHTML = `<div style="text-align: center; color: #888; padding: 40px 20px;"><div style="font-size: 24px; margin-bottom: 10px;">${model.icon}</div><div>Generating...</div></div>`;
+      } else if (modelState.content) {
+        contentDiv.innerHTML = renderMarkdown(modelState.content);
+      } else {
+        contentDiv.innerHTML = '<div style="color: #888; padding: 20px; text-align: center;">Loading...</div>';
+      }
+      contentArea.appendChild(contentDiv);
+    });
 
-    // Deep content
-    const deepContent = document.createElement('div');
-    deepContent.id = 'deep-content';
-    deepContent.style.cssText = `
-      display: ${activeTab === 'deep' ? 'block' : 'none'};
-      white-space: normal;
-      line-height: 1.6;
-      padding: 4px;
-    `;
-    // Add markdown styling
-    deepContent.className = 'markdown-content';
-
-    if (deepInProgress) {
-      deepContent.innerHTML = '<div style="text-align: center; color: #888; padding: 40px 20px;"><div style="font-size: 24px; margin-bottom: 10px;">🤔</div><div>Thinking deeply... ~45s</div></div>';
-    } else if (deepSummary) {
-      deepContent.innerHTML = renderMarkdown(deepSummary);
-    } else {
-      deepContent.innerHTML = 'Starting deep analysis...';
-    }
-
-    contentArea.appendChild(fastContent);
-    contentArea.appendChild(deepContent);
-
-    // Assemble container
     container.appendChild(dragHandle);
     container.appendChild(tabBar);
     container.appendChild(contentArea);
@@ -509,343 +414,306 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
     return container;
   }
 
-  function switchTab(tab) {
-    activeTab = tab;
 
-    // Update tab styles
-    const fastTab = document.getElementById('fast-tab');
-    const deepTab = document.getElementById('deep-tab');
+  // Save session to storage
+  let saveCount = 0;
+  async function saveSession() {
+    const key = getStorageKey();
 
-    if (fastTab && deepTab) {
-      fastTab.style.background = tab === 'fast' ? '#2a2a2a' : 'transparent';
-      fastTab.style.borderBottom = `2px solid ${tab === 'fast' ? '#5C5CFF' : 'transparent'}`;
+    const sessionData = {
+      originalText: (state.originalText || '').slice(0, QUOTA.MAX_ORIGINAL_TEXT_CHARS),
+      models: {},
+      timestamp: Date.now()
+    };
 
-      deepTab.style.background = tab === 'deep' ? '#2a2a2a' : 'transparent';
-      deepTab.style.borderBottom = `2px solid ${tab === 'deep' ? '#5C5CFF' : 'transparent'}`;
-    }
-
-    // Toggle content visibility
-    const fastContent = document.getElementById('fast-content');
-    const deepContent = document.getElementById('deep-content');
-
-    if (fastContent && deepContent) {
-      fastContent.style.display = tab === 'fast' ? 'block' : 'none';
-      deepContent.style.display = tab === 'deep' ? 'block' : 'none';
-    }
-
-    // Hide badge when deep tab is viewed (only if complete, keep yellow dot visible if in progress)
-    if (tab === 'deep') {
-      const badge = document.getElementById('deep-badge');
-      if (badge && deepComplete) {
-        badge.style.display = 'none';
-      }
-    }
-
-    // Show badge when switching back to fast tab (if deep is complete or in progress)
-    if (tab === 'fast') {
-      const badge = document.getElementById('deep-badge');
-      if (badge && (deepInProgress || deepComplete)) {
-        badge.style.display = 'block';
-      }
-    }
-  }
-
-  function updateFastSummary(text) {
-    fastSummary = text;
-
-    // Show panel on first token arrival
-    if (waitingForFirstToken) {
-      waitingForFirstToken = false;
-
-      // Reset button state
-      const summarizeFab = document.querySelector('.fab[title="Summarize selection"]');
-      if (summarizeFab) {
-        summarizeFab.disabled = false;
-        summarizeFab.innerHTML = '✨';
-        summarizeFab.style.cursor = 'pointer';
+    Object.keys(state.models).forEach(modelId => {
+      let messages = state.models[modelId].messages || [];
+      messages = messages.map(m => ({
+        ...m,
+        content: (m.content || '').slice(0, QUOTA.MAX_CHARS_PER_MESSAGE)
+      }));
+      if (messages.length > QUOTA.MAX_MESSAGES_PER_MODEL) {
+        messages = messages.slice(-QUOTA.MAX_MESSAGES_PER_MODEL);
       }
 
-      // Now create and show the panel
-      createDualTabPanel();
-    }
-
-    // Ensure modal exists
-    let container = document.getElementById('claude-summary-container');
-    if (!container) {
-      createDualTabPanel();
-      container = document.getElementById('claude-summary-container');
-    }
-
-    const fastContent = document.getElementById('fast-content');
-    if (fastContent) {
-      fastContent.innerHTML = renderMarkdown(text);
-    }
-  }
-
-  function updateDeepSummary(text) {
-    deepSummary = text;
-
-    // Ensure modal exists
-    let container = document.getElementById('claude-summary-container');
-    if (!container) {
-      createDualTabPanel();
-      container = document.getElementById('claude-summary-container');
-    }
-
-    const deepContent = document.getElementById('deep-content');
-    if (deepContent) {
-      deepContent.innerHTML = renderMarkdown(text);
-    }
-
-    // Show yellow dot when deep analysis starts (first update)
-    if (deepInProgress) {
-      const badge = document.getElementById('deep-badge');
-      if (badge) {
-        badge.style.color = '#FFC107';
-        badge.style.display = 'block';
-      }
-    }
-  }
-
-  function playCompletionSound() {
-    try {
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-
-      // Create pleasant notification tone (two-note ascending)
-      const playNote = (frequency, startTime, duration) => {
-        const oscillator = audioContext.createOscillator();
-        const gainNode = audioContext.createGain();
-
-        oscillator.connect(gainNode);
-        gainNode.connect(audioContext.destination);
-
-        oscillator.frequency.value = frequency;
-        oscillator.type = 'sine';
-
-        gainNode.gain.setValueAtTime(0.3, startTime);
-        gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + duration);
-
-        oscillator.start(startTime);
-        oscillator.stop(startTime + duration);
+      sessionData.models[modelId] = {
+        messages: messages,
+        content: state.models[modelId].content,
+        duration: state.models[modelId].duration,
+        complete: state.models[modelId].complete
       };
+    });
 
-      const now = audioContext.currentTime;
-      playNote(523.25, now, 0.15); // C5
-      playNote(659.25, now + 0.15, 0.2); // E5
-    } catch (e) {
-      console.log('Could not play sound:', e);
+    await chrome.storage.local.set({ [key]: sessionData });
+
+    saveCount++;
+    if (saveCount % 10 === 0) {
+      await cleanupOldSessions();
     }
   }
 
-  function markDeepComplete() {
-    deepInProgress = false;
-    deepComplete = true;
+  // LRU cleanup
+  async function cleanupOldSessions() {
+    const all = await chrome.storage.local.get(null);
+    const sessions = Object.entries(all)
+      .filter(([k]) => k.startsWith('session:'))
+      .map(([k, v]) => ({ key: k, timestamp: v.timestamp }))
+      .sort((a, b) => b.timestamp - a.timestamp);
 
-    // Update badge to green
-    const badge = document.getElementById('deep-badge');
-    if (badge) {
-      badge.style.color = '#50C550';
-      badge.style.display = 'block';
+    if (sessions.length > QUOTA.MAX_SESSIONS) {
+      const toDelete = sessions.slice(QUOTA.MAX_SESSIONS).map(s => s.key);
+      await chrome.storage.local.remove(toDelete);
     }
+  }
 
-    // Re-enable reset button if it's disabled
-    const resetButton = document.querySelector('button[title="Reset and regenerate summary"]');
-    if (resetButton && resetButton.disabled) {
-      resetButton.disabled = false;
-      resetButton.innerHTML = '🔄';
-      resetButton.style.cursor = 'pointer';
+  // Check for previous session
+  async function checkPreviousSession() {
+    if (!state.config) return;
+
+    const key = getStorageKey();
+    const data = await chrome.storage.local.get(key);
+
+    if (data[key]) {
+      const session = data[key];
+      const ageMs = Date.now() - session.timestamp;
+      const ageDays = ageMs / (1000 * 60 * 60 * 24);
+
+      if (ageDays < 7) {
+        showResumeBanner(session);
+      }
     }
-
-    // Play completion sound
-    playCompletionSound();
   }
 
-  function showToast(message) {
-    const toast = document.createElement('div');
-    toast.style.cssText = `
-      position: fixed;
-      bottom: 30px;
-      right: 30px;
-      background: #2a2a2a;
-      color: #e0e0e0;
-      padding: 12px 20px;
-      border-radius: 6px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.3);
-      z-index: 10001;
-      font-size: 14px;
-      animation: slideIn 0.3s ease-out;
-    `;
-    toast.textContent = message;
-    document.body.appendChild(toast);
+  // Show resume banner
+  function showResumeBanner(session) {
+    if (document.getElementById('resume-banner')) return;
 
-    setTimeout(() => {
-      toast.style.animation = 'slideOut 0.3s ease-out';
-      setTimeout(() => toast.remove(), 300);
-    }, 2000);
+    const banner = document.createElement('div');
+    banner.id = 'resume-banner';
+
+    const text = document.createElement('span');
+    text.textContent = `📝 Previous summary (${formatAge(session.timestamp)})`;
+
+    const resumeBtn = document.createElement('button');
+    resumeBtn.id = 'resume-btn';
+    resumeBtn.textContent = 'Resume';
+    resumeBtn.onclick = () => {
+      restoreSession(session);
+      banner.remove();
+    };
+
+    const dismissBtn = document.createElement('button');
+    dismissBtn.id = 'dismiss-btn';
+    dismissBtn.textContent = '✕';
+    dismissBtn.onclick = () => banner.remove();
+
+    banner.appendChild(text);
+    banner.appendChild(resumeBtn);
+    banner.appendChild(dismissBtn);
+    document.body.appendChild(banner);
   }
 
-  function resetState() {
-    activeTab = 'fast';
-    fastSummary = '';
-    deepSummary = '';
-    deepInProgress = false;
-    deepComplete = false;
-    currentConversationId = null;
-    conversationHistory = [];
-    currentTranscript = null;
+  // Restore session
+  function restoreSession(session) {
+    state.originalText = session.originalText;
+
+    Object.keys(session.models).forEach(modelId => {
+      if (state.models[modelId]) {
+        state.models[modelId] = {
+          ...state.models[modelId],
+          ...session.models[modelId]
+        };
+      }
+    });
+
+    createDualTabPanel();
+    updateContentDisplay();
   }
 
-  // Inject FABs: "✨" for Summarize, "✒️" for Draft
+  // Inject FABs
   function injectFABs() {
-    // Summarize FAB
     const summarizeFab = document.createElement('button');
     summarizeFab.className = 'fab';
     summarizeFab.innerHTML = '✨';
     summarizeFab.title = 'Summarize selection';
     summarizeFab.style.cssText = `
-      position: fixed;
-      top: 20px;
-      left: 50%;
-      transform: translateX(-45px);
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      background: #5C5CFF;
-      color: white;
-      border: none;
-      cursor: pointer;
-      z-index: 10000;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      font-size: 18px;
-      transition: all 0.2s;
+      position: fixed; top: 20px; left: 50%; transform: translateX(-45px);
+      width: 40px; height: 40px; border-radius: 50%; background: #5C5CFF; color: white;
+      border: none; cursor: pointer; z-index: 10000; box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+      display: none; align-items: center; justify-content: center; font-size: 18px;
     `;
-    summarizeFab.onmouseover = () => {
-      summarizeFab.style.background = '#4646FF';
-      summarizeFab.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
-    };
-    summarizeFab.onmouseout = () => {
-      summarizeFab.style.background = '#5C5CFF';
-      summarizeFab.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
-    };
     summarizeFab.onclick = () => {
       const selectedText = window.getSelection().toString();
       if (!selectedText) return;
 
-      // Store original text for regeneration
-      originalText = selectedText;
-
-      // Reset state but don't show panel yet
+      state.originalText = selectedText;
       resetState();
-      deepInProgress = true;
-      waitingForFirstToken = true;
+      state.originalText = selectedText;
+      state.config.models.forEach(m => {
+        state.models[m.id].inProgress = true;
+      });
+      state.waitingForFirstToken = true;
 
-      // Show loading state on button
       summarizeFab.disabled = true;
       summarizeFab.innerHTML = '⏳';
       summarizeFab.style.cursor = 'wait';
 
-      // Start both fast and deep requests
-      chrome.runtime.sendMessage({
-        action: 'summarizeDual',
-        text: selectedText,
-      });
+      chrome.runtime.sendMessage({ action: 'summarizeDual', text: selectedText });
     };
 
-    // Draft FAB
     const draftFab = document.createElement('button');
     draftFab.className = 'fab';
     draftFab.innerHTML = '✒️';
-    draftFab.title = 'Draft a professional response';
+    draftFab.title = 'Draft response';
     draftFab.style.cssText = `
-      position: fixed;
-      top: 20px;
-      left: 50%;
-      transform: translateX(5px);
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      background: #55BF55;
-      color: white;
-      border: none;
-      cursor: pointer;
-      z-index: 10000;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      font-size: 18px;
-      transition: all 0.2s;
+      position: fixed; top: 20px; left: 50%; transform: translateX(5px);
+      width: 40px; height: 40px; border-radius: 50%; background: #55BF55; color: white;
+      border: none; cursor: pointer; z-index: 10000; box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+      display: none; align-items: center; justify-content: center; font-size: 18px;
     `;
-    draftFab.onmouseover = () => {
-      draftFab.style.background = '#33AA33';
-      draftFab.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
-    };
-    draftFab.onmouseout = () => {
-      draftFab.style.background = '#55BF55';
-      draftFab.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
-    };
     draftFab.onclick = () => {
       const selectedText = window.getSelection().toString();
       if (!selectedText) return;
-
-      chrome.runtime.sendMessage({
-        action: 'draft',
-        text: selectedText,
-      });
+      chrome.runtime.sendMessage({ action: 'draft', text: selectedText });
     };
 
-    // Toggle FABs on selection
     document.addEventListener('selectionchange', () => {
       const selection = window.getSelection().toString().trim();
-      if (selection) {
-        summarizeFab.style.display = 'flex';
-        draftFab.style.display = 'flex';
-      } else {
-        summarizeFab.style.display = 'none';
-        draftFab.style.display = 'none';
-      }
+      summarizeFab.style.display = selection ? 'flex' : 'none';
+      draftFab.style.display = selection ? 'flex' : 'none';
     });
 
     document.body.appendChild(summarizeFab);
     document.body.appendChild(draftFab);
   }
 
-  injectFABs();
-
-  // Listen for streaming updates
+  // Message listener
   chrome.runtime.onMessage.addListener((request) => {
-    if (request.action === 'setTranscript') {
-      // Store transcript and show copy button
-      currentTranscript = request.transcript;
-      const copyBtn = document.getElementById('copy-transcript-btn');
-      if (copyBtn) {
-        copyBtn.style.display = 'flex';
+    // Config error
+    if (request.action === 'configError') {
+      console.error('AI Config Error:', request.error);
+      return;
+    }
+
+    // Initialize summary state
+    if (request.action === 'initSummary') {
+      state.originalText = request.originalText;
+      state.transcript = request.transcript;
+
+      if (request.config && !state.config) {
+        initModelsState(request.config);
+      }
+
+      state.config.models.forEach(m => {
+        state.models[m.id].messages = [];
+        state.models[m.id].content = '';
+        state.models[m.id].inProgress = true;
+        state.models[m.id].complete = false;
+        state.models[m.id].duration = null;
+      });
+
+      // Set flag so panel is created on first token
+      state.waitingForFirstToken = true;
+    }
+
+    // Set initial message per model
+    if (request.action === 'setInitialMessage') {
+      if (state.models[request.modelId]) {
+        state.models[request.modelId].messages = [request.initialMessage];
       }
     }
 
-    if (request.action === 'updateFastSummary') {
-      updateFastSummary(request.summary);
+    // Update summary (delta)
+    if (request.action === 'updateSummary') {
+      const modelId = request.modelId;
+      if (!state.models[modelId]) return;
+
+      // Show panel on first token
+      if (state.waitingForFirstToken) {
+        state.waitingForFirstToken = false;
+        const fab = document.querySelector('.fab[title="Summarize selection"]');
+        if (fab) {
+          fab.disabled = false;
+          fab.innerHTML = '✨';
+          fab.style.cursor = 'pointer';
+        }
+        createDualTabPanel();
+      }
+
+      // Append delta to content (works for both initial and followup)
+      state.models[modelId].content += request.delta;
+      state.models[modelId].inProgress = true;
+
+      if (modelId === state.activeTab) {
+        updateContentDisplay();
+      }
+      updateBadge(modelId);
     }
 
-    if (request.action === 'updateDeepSummary') {
-      updateDeepSummary(request.summary);
+    // Summary complete
+    if (request.action === 'summaryComplete') {
+      const modelId = request.modelId;
+      if (!state.models[modelId]) return;
+
+      state.models[modelId].inProgress = false;
+      state.models[modelId].complete = true;
+      state.models[modelId].duration = request.duration;
+
+      // Store assistant response
+      state.models[modelId].messages.push({
+        role: 'assistant',
+        content: request.response
+      });
+
+      updateBadge(modelId);
+      if (modelId === state.activeTab) {
+        updateContentDisplay();
+      }
+      playCompletionSound();
+      saveSession();
     }
 
-    if (request.action === 'deepSummaryComplete') {
-      markDeepComplete();
-    }
-
+    // Summary error
     if (request.action === 'summaryError') {
-      if (request.mode === 'fast') {
-        updateFastSummary('Error: ' + request.error);
-      } else {
-        updateDeepSummary('Error: ' + request.error);
-        deepInProgress = false;
+      const modelId = request.modelId;
+      if (!state.models[modelId]) return;
+
+      state.models[modelId].inProgress = false;
+
+      // Rollback pending user message on error
+      const msgs = state.models[modelId].messages;
+      if (msgs.length > 0 && msgs[msgs.length - 1].role === 'user') {
+        msgs.pop();
       }
+
+      state.models[modelId].content = `Error: ${request.error}`;
+      if (modelId === state.activeTab) {
+        updateContentDisplay();
+      }
+      updateBadge(modelId);
+    }
+
+    // Set transcript
+    if (request.action === 'setTranscript') {
+      state.transcript = request.transcript;
+      const copyBtn = document.getElementById('copy-text-btn');
+      if (copyBtn) copyBtn.title = 'Copy transcript';
     }
   });
+
+  // Initialize
+  async function init() {
+    // Get config from background
+    chrome.runtime.sendMessage({ action: 'getConfig' }, (response) => {
+      if (response?.config) {
+        initModelsState(response.config);
+        checkPreviousSession();
+      }
+    });
+
+    injectFABs();
+  }
+
+  init();
 
 } // End initialization check

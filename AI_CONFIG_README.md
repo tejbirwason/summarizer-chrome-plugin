@@ -2,82 +2,114 @@
 
 ## Quick Config: `ai-config.json`
 
-Edit this file to change models and prompts without touching Python code.
+Edit this file to change models and prompts without touching code.
 
 ### File Structure
 
 ```json
 {
-  "models": {
-    "fast": "gpt-5.1",      // Model for fast mode
-    "deep": "gpt-5.1"       // Model for deep mode
-  },
-  "reasoning": {
-    "fast": "none",         // none | low | medium | high
-    "deep": "high"
-  },
-  "verbosity": {
-    "fast": "low",          // low | medium | high
-    "deep": "low"
-  },
-  "prompts": {
-    "fast": "Your prompt...",
-    "deep": "Your prompt..."
-  }
+  "models": [
+    {
+      "id": "opus",
+      "name": "Opus 4.5",
+      "icon": "🟣",
+      "litellm_model": "anthropic/claude-opus-4-5-20251101",
+      "max_tokens": 4096,
+      "prompt": "Summarize and extract key insights. Start with TLDR. Use markdown:\n\n"
+    },
+    {
+      "id": "gpt",
+      "name": "GPT-5.2",
+      "icon": "🤖",
+      "litellm_model": "openai/gpt-5.2",
+      "reasoning": "high",
+      "max_tokens": 4096,
+      "prompt": "Summarize and extract key insights. Start with TLDR. Use markdown:\n\n"
+    }
+  ],
+  "defaultPrompt": "Summarize concisely. Start with TLDR. Use markdown:\n\n"
 }
 ```
 
-### Making Changes
+### Model Object Fields
 
-1. **Change model**: Edit `models.fast` or `models.deep`
-2. **Adjust reasoning**: Change `reasoning.fast` or `reasoning.deep`
-3. **Modify prompts**: Update text in `prompts.fast` or `prompts.deep`
-4. **Save** - Changes apply immediately (no reload needed)
+| Field | Required | Description |
+|-------|----------|-------------|
+| `id` | Yes | Unique identifier (used internally) |
+| `name` | No | Display name in UI |
+| `icon` | No | Emoji shown in tab |
+| `litellm_model` | Yes | LiteLLM format: `provider/model-name` |
+| `max_tokens` | No | Max response tokens (default: 4096) |
+| `prompt` | No | System prompt (falls back to `defaultPrompt`) |
+| `reasoning` | No | For OpenAI models: `none`/`low`/`medium`/`high` |
 
-### Available Models
+### LiteLLM Model Format
 
-- `gpt-5.1` - Latest flagship (Instant with none, Thinking with high)
-- `gpt-5` - Previous flagship
-- `gpt-5-mini` - Faster, cheaper
-- `gpt-5-nano` - Highest throughput
+Uses `provider/model-name` format. Examples:
 
-### Reasoning Levels
+**Anthropic:**
+- `anthropic/claude-opus-4-5-20251101`
+- `anthropic/claude-sonnet-4-20250514`
+- `anthropic/claude-haiku-3-5-20241022`
 
-- `none` - No reasoning (fastest, like GPT-4.1)
-- `low` - Minimal reasoning
-- `medium` - Balanced
-- `high` - Deep thinking (slowest)
+**OpenAI:**
+- `openai/gpt-5.2`
+- `openai/gpt-5.1`
+- `openai/gpt-4o`
 
-### Verbosity Levels
+**Other providers:** See [LiteLLM docs](https://docs.litellm.ai/docs/providers)
 
-- `low` - Concise output
-- `medium` - Balanced
-- `high` - Detailed explanations
+### Adding a New Model
+
+Add an object to the `models` array:
+
+```json
+{
+  "id": "sonnet",
+  "name": "Sonnet 4",
+  "icon": "🔵",
+  "litellm_model": "anthropic/claude-sonnet-4-20250514",
+  "max_tokens": 4096,
+  "prompt": "Be concise. Use markdown:\n\n"
+}
+```
+
+Reload extension to apply changes.
 
 ### Example Configs
 
-**Speed-focused:**
+**Single model:**
 ```json
 {
-  "models": {"fast": "gpt-5-nano", "deep": "gpt-5-mini"},
-  "reasoning": {"fast": "none", "deep": "low"},
-  "verbosity": {"fast": "low", "deep": "low"}
+  "models": [
+    {
+      "id": "main",
+      "icon": "🤖",
+      "litellm_model": "openai/gpt-5.2",
+      "reasoning": "high"
+    }
+  ]
 }
 ```
 
-**Quality-focused:**
+**Three models:**
 ```json
 {
-  "models": {"fast": "gpt-5.1", "deep": "gpt-5.1"},
-  "reasoning": {"fast": "low", "deep": "high"},
-  "verbosity": {"fast": "medium", "deep": "high"}
+  "models": [
+    {"id": "opus", "icon": "🟣", "litellm_model": "anthropic/claude-opus-4-5-20251101"},
+    {"id": "sonnet", "icon": "🔵", "litellm_model": "anthropic/claude-sonnet-4-20250514"},
+    {"id": "gpt", "icon": "🤖", "litellm_model": "openai/gpt-5.2", "reasoning": "high"}
+  ]
 }
 ```
 
-### Prompt Tips
+### Environment Variables
 
-**Fast mode prompts:** Be specific about format (bullets, headers, length)
+API keys are read from `.env`:
 
-**Deep mode prompts:** Emphasize completeness, analysis, insights
+```
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+```
 
-**Use newlines:** `\n` in JSON for line breaks in prompts
+LiteLLM automatically uses the appropriate key based on the provider in `litellm_model`.

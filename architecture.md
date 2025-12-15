@@ -10,7 +10,7 @@ flowchart LR
       CJS[content-dual.js<br/>Global Content Script]
       YTJS[youtube-content.js<br/>YouTube Content Script]
       BG[background.js<br/>Service Worker]
-      UI[Overlay UI<br/>Dark Themed Panel]
+      UI[Overlay UI<br/>Tabbed Panel]
     end
     subgraph Messaging[Chrome Messaging]
       MSG[sendMessage / Port]
@@ -18,45 +18,68 @@ flowchart LR
     end
   end
 
-  subgraph NativeHost[Native Host]
-    MAN[com.ytsummary.json<br/>Native Host Manifest]
-    PY[yt-summary.py<br/>Python process]
+  subgraph NativeHosts[Native Hosts]
+    YTMAN[com.ytsummary.json]
+    YTPY[yt-summary.py]
+    AIMAN[com.localai.json]
+    AIPY[local-ai-handler.py]
   end
 
-  subgraph APIs[External AI & Data]
-    OAI[OpenAI o3 API]
-    CLAUDE[Claude API]
+  subgraph APIs[External APIs]
+    LITELLM[LiteLLM<br/>Any Provider]
+    CLAUDE[Claude API<br/>Drafts Only]
     YTAPI[YouTube Transcript API]
   end
 
-  %% Selected Text: Summarize & Draft
-  CJS -->|summarizeSelection| BG
+  %% Selected Text: Summarize
+  CJS -->|summarizeDual| BG
+  BG -->|Native Messaging| AIPY
+  AIMAN --- AIPY
+  AIPY -->|stream request| LITELLM
+  LITELLM -.->|stream chunks| AIPY
+  AIPY -.->|stream deltas| BG
+  BG -.->|updateSummary| CJS
+  CJS -.->|render markdown| UI
+
+  %% Draft Response
   CJS -->|draftResponse| BG
-
-  BG -->|stream request| OAI
-  OAI -.->|stream chunks| BG
-  BG -.->|stream updates| CJS
-  CJS -.->|append text| UI
-
   BG -->|stream request| CLAUDE
   CLAUDE -.->|stream chunks| BG
-  BG -.->|stream updates| CJS
-  CJS -.->|append text| UI
+  BG -.->|updateDraft| CJS
 
   %% YouTube Transcript Summarization
   YTJS -->|summarizeVideo| BG
-  BG -->|video_id via Native Messaging| PY
-  MAN --- PY
-  PY -->|fetch transcript| YTAPI
-  YTAPI --> PY
-  PY --> BG
-  BG -->|stream request| OAI
-  OAI -.->|stream chunks| BG
-  BG -.->|stream updates| YTJS
-  YTJS -.->|append text| UI
+  BG -->|video_id| YTPY
+  YTMAN --- YTPY
+  YTPY -->|fetch transcript| YTAPI
+  YTAPI --> YTPY
+  YTPY --> BG
+  BG -->|Native Messaging| AIPY
+  AIPY -->|stream request| LITELLM
+  LITELLM -.->|stream chunks| AIPY
+  AIPY -.->|stream deltas| BG
+  BG -.->|updateSummary| CJS
 ```
 
-- content-dual.js shows FABs, sends messages, and renders streaming results safely via textContent.
-- youtube-content.js detects video pages and initiates transcript summarization.
-- background.js orchestrates API calls (OpenAI o3, Claude) and native messaging to yt-summary.py.
-- yt-summary.py fetches transcripts with youtube-transcript-api and returns JSON over the native messaging protocol.
+## Component Responsibilities
+
+- **content-dual.js**: Shows FABs, creates tabbed panel, renders streaming markdown, handles follow-up questions
+- **youtube-content.js**: Detects video pages, adds Summarize button, initiates transcript summarization
+- **background.js**: Loads ai-config.json, orchestrates native messaging, routes messages between content scripts and native hosts
+- **local-ai-handler.py**: Receives model config, calls LiteLLM with appropriate provider, streams deltas back
+- **yt-summary.py**: Fetches YouTube transcripts via youtube-transcript-api, returns JSON over native messaging protocol
+
+## Config-Driven Model System
+
+Models are defined in `ai-config.json` as an array. Each model runs in parallel when summarizing:
+
+```json
+{
+  "models": [
+    {"id": "opus", "litellm_model": "anthropic/claude-opus-4-5-20251101", ...},
+    {"id": "gpt", "litellm_model": "openai/gpt-5.2", ...}
+  ]
+}
+```
+
+The UI dynamically creates tabs based on the configured models. See `AI_CONFIG_README.md` for details.

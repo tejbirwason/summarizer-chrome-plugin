@@ -1,14 +1,16 @@
 # Summarize & Draft Chrome Extension
 
-A Chrome extension that provides AI-powered text summarization and response drafting capabilities. Features dual-mode summaries (fast + deep) via local AI handler, Claude-powered response drafting, and YouTube video transcript summarization.
+A Chrome extension that provides AI-powered text summarization and response drafting capabilities. Features multi-model summaries (e.g., Opus 4.5 + GPT-5.2) via local AI handler with LiteLLM, Claude-powered response drafting, and YouTube video transcript summarization.
 
 ## Features
 
-- **Dual-Mode Summarization**: Select text and get both fast and deep summaries simultaneously
+- **Multi-Model Summarization**: Select text and get summaries from multiple AI models in parallel (configurable)
 - **Response Drafting**: Click the ✒️ button to draft responses using Claude
 - **YouTube Summarization**: Automatically adds a "Summarize" button to YouTube videos
 - **Streaming Responses**: See results as they're generated in real-time
-- **Configurable AI Models**: Customize models, reasoning levels, and prompts via `ai-config.json`
+- **Follow-up Questions**: Ask follow-up questions inline after summaries complete
+- **Session Persistence**: Resume previous summaries when returning to a page
+- **Configurable AI Models**: Add any LiteLLM-supported model via `ai-config.json`
 
 ## Installation
 
@@ -17,9 +19,9 @@ A Chrome extension that provides AI-powered text summarization and response draf
    - For extension (Claude API):
      - Copy `config.example.js` to `config.js`: `cp config.example.js config.js`
      - Edit `config.js` and add your Anthropic API key
-   - For local AI handler (summarization):
+   - For local AI handler (summarization via LiteLLM):
      - Copy `.env.example` to `.env`: `cp .env.example .env`
-     - Edit `.env` and add your OpenAI API key
+     - Edit `.env` and add API keys for your configured providers (e.g., `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`)
    - Both files are gitignored and won't be committed
 3. Install Python dependencies:
    ```bash
@@ -52,14 +54,15 @@ See `NATIVE_MESSAGING_SETUP.md` for detailed troubleshooting.
 
 ## Usage
 
-1. **Text Summarization**: Select text on any webpage → Click ✨ floating button → See dual-mode results (fast + deep)
+1. **Text Summarization**: Select text on any webpage → Click ✨ floating button → See results from all configured models
 2. **Response Drafting**: Select text → Click ✒️ button → Enter instructions → Press Enter
-3. **YouTube Videos**: Navigate to a YouTube video → Click "✨ Summarize" button → Get dual-mode video summary
-4. **Configure AI**: Edit `ai-config.json` to customize models, reasoning levels, and prompts (see `AI_CONFIG_README.md`)
+3. **YouTube Videos**: Navigate to a YouTube video → Click "✨ Summarize" button → Get multi-model video summary
+4. **Follow-up Questions**: After summary completes, click "💬 Ask about this..." to ask follow-up questions
+5. **Configure AI**: Edit `ai-config.json` to add/remove models (see `AI_CONFIG_README.md`)
 
 ## Security Notes
 
-- **API keys are stored locally**: API keys are in `config.js` (Claude) and `.env` (OpenAI)
+- **API keys are stored locally**: API keys are in `config.js` (Claude) and `.env` (LiteLLM providers)
 - Both files are gitignored and won't be committed to the repository
 - Never commit real API keys to version control
 - For production, consider using secure key management services
@@ -77,11 +80,11 @@ npm run test:coverage   # Run tests with coverage report
 - `background.js` - Service worker handling Claude API and native messaging orchestration
 - `content-dual.js` - Main content script with dual-mode UI overlay and FABs
 - `youtube-content.js` - YouTube-specific button and functionality
-- `local-ai-handler.py` - Native messaging host for dual-mode summarization (fast + deep)
+- `local-ai-handler.py` - Native messaging host for multi-model summarization (LiteLLM)
 - `yt-summary.py` - Native messaging host for YouTube transcript fetching
-- `ai-config.json` - AI model configuration (models, reasoning, prompts)
-- `config.js` - Claude API key (create from config.example.js)
-- `.env` - OpenAI API key (create from .env.example)
+- `ai-config.json` - AI model configuration (see `AI_CONFIG_README.md`)
+- `config.js` - Claude API key for drafts (create from config.example.js)
+- `.env` - API keys for LiteLLM providers (create from .env.example)
 - `manifest.json` - Extension configuration
 
 ## Contributing

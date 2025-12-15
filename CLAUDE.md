@@ -129,6 +129,17 @@ See `NATIVE_MESSAGING_SETUP.md` for detailed setup and troubleshooting.
 - All user inputs sanitized before display (textContent, no innerHTML)
 - Native messaging requires explicit manifest setup
 
+## Debugging
+
+**Log files:**
+- `tail -f /tmp/local-ai-handler.log` - AI summarization (models, errors, API calls)
+- `tail -f /tmp/native-host-test.txt` - YouTube transcript fetching
+
+**Common issues:**
+- Model param errors (reasoning/verbosity) → check ai-config.json values match model requirements
+- `gpt-5.2-chat-latest` only supports `reasoning: "medium"` and `verbosity: "medium"`
+- `gpt-5.2` supports full range (`none`/`low`/`medium`/`high` for reasoning)
+
 ## Testing
 
 The project includes unit and integration tests for major components:

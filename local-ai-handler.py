@@ -1,40 +1,25 @@
 #!/Users/tjwason/.pyenv/versions/3.11.13/bin/python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["litellm", "python-dotenv"]
+# ///
 """
-Local AI Handler for Chrome Extension
-Handles text summarization using OpenAI's o3 (fast) and GPT-5.1 (deep) models
-Supports streaming via native messaging protocol
+Local AI Handler for Chrome Extension - LiteLLM Version
+Stateless handler - receives full messages[] with each request
+Supports multiple models via LiteLLM abstraction
 """
 import datetime
 import json
-import os
 import struct
 import sys
+import time
 from pathlib import Path
-from openai import OpenAI
+
+from dotenv import load_dotenv
+from litellm import completion
 
 # Load environment variables
-from dotenv import load_dotenv
 load_dotenv()
-
-# Initialize OpenAI client
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-# Load AI configuration
-config_path = Path(__file__).parent / "ai-config.json"
-try:
-    with open(config_path, 'r') as f:
-        AI_CONFIG = json.load(f)
-except Exception as e:
-    # Fallback to defaults if config not found
-    AI_CONFIG = {
-        "models": {"fast": "gpt-5.1", "deep": "gpt-5.1"},
-        "reasoning": {"fast": "none", "deep": "high"},
-        "verbosity": {"fast": "low", "deep": "low"},
-        "prompts": {
-            "fast": "Summarize concisely. Format your response using markdown:\n\n",
-            "deep": "Extract key insights, but be concise. Start with a TLDR. Format your response using markdown:\n\n"
-        }
-    }
 
 def log_message(message):
     """Log messages to file for debugging"""
@@ -42,153 +27,101 @@ def log_message(message):
     with open("/tmp/local-ai-handler.log", "a") as f:
         f.write(f"[{timestamp}] {message}\n")
 
-def send_message(message_dict):
-    """Send a message back to the extension via native messaging protocol"""
+def read_message():
+    """Read native messaging input"""
+    length_bytes = sys.stdin.buffer.read(4)
+    if not length_bytes:
+        return None
+    length = struct.unpack("I", length_bytes)[0]
+    message = sys.stdin.buffer.read(length)
+    return json.loads(message.decode('utf-8'))
+
+def send_message(msg):
+    """Send native messaging output"""
+    encoded = json.dumps(msg).encode('utf-8')
+    sys.stdout.buffer.write(struct.pack("I", len(encoded)))
+    sys.stdout.buffer.write(encoded)
+    sys.stdout.buffer.flush()
+
+def handle_request(data):
+    """Handle summarize or followup request (stateless)"""
+    model_id = data['modelId']
+    model_config = data['modelConfig']
+    messages = data['messages']  # Full conversation history from extension
+
+    log_message(f"Request for model {model_id}: {model_config['litellm_model']}, messages count: {len(messages)}")
+
+    # Build completion params
+    params = {
+        "model": model_config['litellm_model'],
+        "messages": messages,
+        "stream": True,
+        "max_tokens": model_config.get('max_tokens', 4096)
+    }
+
+    # Add reasoning for OpenAI models that support it
+    if 'reasoning' in model_config and 'openai' in model_config['litellm_model']:
+        params['reasoning_effort'] = model_config['reasoning']
+
+    log_message(f"LiteLLM params: model={params['model']}, max_tokens={params['max_tokens']}")
+
+    start_time = time.time()
+    full_response = ""
+
     try:
-        encoded = json.dumps(message_dict).encode('utf-8')
-        sys.stdout.buffer.write(struct.pack("I", len(encoded)))
-        sys.stdout.buffer.write(encoded)
-        sys.stdout.buffer.flush()
-    except Exception as e:
-        log_message(f"Error sending message: {str(e)}")
+        response = completion(**params)
 
-def summarize_fast(text):
-    """Fast summarization using configured model and prompt"""
-    try:
-        model = AI_CONFIG["models"]["fast"]
-        reasoning = AI_CONFIG["reasoning"]["fast"]
-        verbosity = AI_CONFIG["verbosity"]["fast"]
-        prompt = AI_CONFIG["prompts"]["fast"]
+        for chunk in response:
+            # Handle different chunk formats from various providers
+            if hasattr(chunk, 'choices') and chunk.choices:
+                delta = chunk.choices[0].delta
+                if hasattr(delta, 'content') and delta.content:
+                    content = delta.content
+                    full_response += content
+                    # Send only the delta, not full response (O(n) not O(n²))
+                    send_message({
+                        "type": "delta",
+                        "modelId": model_id,
+                        "delta": content
+                    })
 
-        log_message(f"Starting fast summarization (model={model}, reasoning={reasoning}, verbosity={verbosity}) for text length: {len(text)}")
-        log_message(f"API Call: model={model}, input_length={len(text)}, reasoning={reasoning}, verbosity={verbosity}, streaming=True")
+        duration_ms = int((time.time() - start_time) * 1000)
+        log_message(f"Complete: {model_id} in {duration_ms}ms, response length: {len(full_response)}")
 
-        stream = client.responses.create(
-            model=model,
-            input=f"{prompt}{text}",
-            reasoning={"effort": reasoning},
-            text={"verbosity": verbosity},
-            stream=True
-        )
-
-        log_message("gpt-5.1 API call initiated successfully")
-
-        summary = ""
-        for event in stream:
-            if event.type == 'response.output_text.delta':
-                summary += event.delta
-                # Send streaming update
-                send_message({
-                    "type": "delta",
-                    "mode": "fast",
-                    "delta": event.delta,
-                    "summary": summary
-                })
-
-        # Send completion
         send_message({
             "type": "complete",
-            "mode": "fast",
-            "summary": summary
+            "modelId": model_id,
+            "duration_ms": duration_ms,
+            "response": full_response
         })
-
-        log_message(f"Fast summarization complete, length: {len(summary)}")
 
     except Exception as e:
-        error_msg = f"Error in fast summarization: {str(e)}"
-        log_message(error_msg)
+        error_msg = str(e)
+        log_message(f"Error for {model_id}: {error_msg}")
         send_message({
             "type": "error",
-            "mode": "fast",
-            "error": error_msg
-        })
-
-def summarize_deep(text):
-    """Deep summarization using configured model and prompt"""
-    try:
-        model = AI_CONFIG["models"]["deep"]
-        reasoning = AI_CONFIG["reasoning"]["deep"]
-        verbosity = AI_CONFIG["verbosity"]["deep"]
-        prompt = AI_CONFIG["prompts"]["deep"]
-
-        log_message(f"Starting deep summarization (model={model}, reasoning={reasoning}, verbosity={verbosity}) for text length: {len(text)}")
-        log_message(f"API Call: model={model}, input_length={len(text)}, reasoning={reasoning}, verbosity={verbosity}, streaming=True")
-
-        stream = client.responses.create(
-            model=model,
-            input=f"{prompt}{text}",
-            text={"verbosity": verbosity},
-            reasoning={"effort": reasoning},
-            stream=True
-        )
-
-        log_message("gpt-5.1 API call initiated successfully")
-
-        summary = ""
-        for event in stream:
-            if event.type == 'response.output_text.delta':
-                summary += event.delta
-                # Send streaming update
-                send_message({
-                    "type": "delta",
-                    "mode": "deep",
-                    "delta": event.delta,
-                    "summary": summary
-                })
-
-        # Send completion
-        send_message({
-            "type": "complete",
-            "mode": "deep",
-            "summary": summary
-        })
-
-        log_message(f"Deep summarization complete, length: {len(summary)}")
-
-    except Exception as e:
-        error_msg = f"Error in deep summarization: {str(e)}"
-        log_message(error_msg)
-        send_message({
-            "type": "error",
-            "mode": "deep",
+            "modelId": model_id,
             "error": error_msg
         })
 
 def main():
     """Main loop for native messaging"""
-    log_message("Local AI Handler started")
+    log_message("Local AI Handler (LiteLLM) started")
 
     while True:
         try:
-            # Read message length (4 bytes)
-            raw_length = sys.stdin.buffer.read(4)
-            if not raw_length:
+            msg = read_message()
+            if msg is None:
                 log_message("No more input, exiting")
                 break
 
-            length = struct.unpack("I", raw_length)[0]
-
-            # Read and parse message
-            message_bytes = sys.stdin.buffer.read(length)
-            message = json.loads(message_bytes.decode('utf-8'))
-
-            action = message.get("action")
+            action = msg.get('action')
             log_message(f"Received action: {action}")
 
-            if action == "summarize":
-                text = message.get("text", "")
-                mode = message.get("mode", "fast")
-
-                log_message(f"Summarizing in {mode} mode, text length: {len(text)}")
-
-                if mode == "deep":
-                    summarize_deep(text)
-                else:
-                    summarize_fast(text)
-
-            elif action == "health":
-                send_message({"status": "healthy", "service": "Local AI Handler"})
-
+            if action in ('summarize', 'followup'):
+                handle_request(msg)
+            elif action == 'health':
+                send_message({"status": "healthy", "service": "Local AI Handler (LiteLLM)"})
             else:
                 send_message({"type": "error", "error": f"Unknown action: {action}"})
 
