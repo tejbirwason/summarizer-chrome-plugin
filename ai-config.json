@@ -1,22 +1,23 @@
 {
   "models": [
     {
-      "id": "opus",
-      "name": "Opus 4.5",
-      "icon": "🟣",
-      "litellm_model": "anthropic/claude-opus-4-5-20251101",
-      "max_tokens": 4096,
-      "prompt": "Summarize and extract key insights. Start with TLDR. Use markdown:\n\n"
-    },
-    {
       "id": "gpt",
       "name": "GPT-5.2",
       "icon": "🤖",
       "litellm_model": "openai/gpt-5.2",
       "reasoning": "high",
       "max_tokens": 4096,
-      "prompt": "Summarize and extract key insights. Start with TLDR. Use markdown:\n\n"
+      "prompt": "Summarize the key insights. Start with TLDR. End with 3-5 direct quotes. Be direct. No contrastive framing—don't define things by what they aren't. Use markdown:\n\n"
+    },
+    {
+      "id": "opus",
+      "name": "Opus 4.5",
+      "icon": "🟣",
+      "litellm_model": "anthropic/claude-opus-4-5-20251101",
+      "max_tokens": 16000,
+      "thinking": {"type": "enabled", "budget_tokens": 10000},
+      "prompt": "DEPTH over BREADTH. Use bullet points within each section.\n\nTLDR: One sentence summarizing YOUR analysis (what's distinctive about this content), not the content itself.\n\nTWEET: One pithy, direct, tweetable line capturing the core insight.\n\n1. DISTINCTIVE PERSPECTIVE: What's non-obvious or contrarian? Who are they arguing against?\n\n2. REASONING STYLE: What mental models, analogies, frameworks?\n\n3. STICKY FORMULATIONS: 2-3 memorable phrases.\n\nBe direct. No contrastive framing—don't define things by what they aren't. Attend to informal moments. No factual duplication. Max 300 words. Markdown:\n\n"
     }
   ],
-  "defaultPrompt": "Summarize concisely. Start with TLDR. Use markdown:\n\n"
+  "defaultPrompt": "Summarize concisely. Start with TLDR. Be direct. No contrastive framing—don't define things by what they aren't. Use markdown:\n\n"
 }

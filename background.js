@@ -245,6 +245,51 @@ async function getVideoTranscriptAndSummarize(videoId, tab) {
   }
 }
 
+// Open in Claude Code (via Ghostty)
+async function openInClaudeCode(text, tab) {
+  const port = chrome.runtime.connectNative('com.localai');
+
+  port.onMessage.addListener(async (response) => {
+    if (response.type === 'complete' && response.action === 'openInCC') {
+      await safeSend(tab, { action: 'openInCCComplete', filepath: response.filepath });
+      port.disconnect();
+    } else if (response.type === 'error') {
+      await safeSend(tab, { action: 'openInCCError', error: response.error });
+      port.disconnect();
+    }
+  });
+
+  port.onDisconnect.addListener(() => {
+    if (chrome.runtime.lastError) {
+      console.error('Native messaging error:', chrome.runtime.lastError);
+    }
+  });
+
+  port.postMessage({ action: 'openInCC', text: text });
+}
+
+// Open YouTube video transcript in Claude Code
+async function openVideoInClaudeCode(videoId, tab) {
+  try {
+    const nativeResponse = await chrome.runtime.sendNativeMessage(
+      'com.ytsummary',
+      { video_id: videoId }
+    );
+
+    if (!nativeResponse.text || nativeResponse.text.startsWith('Error')) {
+      throw new Error(nativeResponse.text || 'No transcript received');
+    }
+
+    await openInClaudeCode(nativeResponse.text, tab);
+  } catch (error) {
+    console.error('Error fetching video transcript for CC:', error);
+    await safeSend(tab, {
+      action: 'openInCCError',
+      error: `Failed to get transcript: ${error.message}`
+    });
+  }
+}
+
 // Draft response handling (unchanged - still uses Hetzner API)
 async function getDraftResponse(text, tab, instructions = '') {
   return new Promise(async (resolve) => {
@@ -327,6 +372,16 @@ function handleRequest(request, sender, sendResponse) {
 
   if (request.action === 'summarizeVideo') {
     getVideoTranscriptAndSummarize(request.videoId, tab);
+    return true;
+  }
+
+  if (request.action === 'openInCC') {
+    openInClaudeCode(request.text, tab);
+    return true;
+  }
+
+  if (request.action === 'openVideoInCC') {
+    openVideoInClaudeCode(request.videoId, tab);
     return true;
   }
 

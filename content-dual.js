@@ -532,16 +532,46 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
 
   // Inject FABs
   function injectFABs() {
-    const summarizeFab = document.createElement('button');
-    summarizeFab.className = 'fab';
-    summarizeFab.innerHTML = '✨';
-    summarizeFab.title = 'Summarize selection';
-    summarizeFab.style.cssText = `
-      position: fixed; top: 20px; left: 50%; transform: translateX(-45px);
-      width: 40px; height: 40px; border-radius: 50%; background: #5C5CFF; color: white;
-      border: none; cursor: pointer; z-index: 10000; box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-      display: none; align-items: center; justify-content: center; font-size: 18px;
+    // Spinner keyframe
+    const spinStyle = document.createElement('style');
+    spinStyle.textContent = `@keyframes fab-spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`;
+    document.head.appendChild(spinStyle);
+
+    const fabContainer = document.createElement('div');
+    fabContainer.id = 'fab-container';
+    fabContainer.style.cssText = `
+      position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+      display: none; gap: 8px; z-index: 10000;
     `;
+
+    function makeFab(emoji, bg, hoverBg, title) {
+      const btn = document.createElement('button');
+      btn.className = 'fab';
+      btn.innerHTML = emoji;
+      btn.title = title;
+      btn._emoji = emoji;
+      btn._bg = bg;
+      btn.style.cssText = `
+        width: 40px; height: 40px; border-radius: 50%; background: ${bg}; color: white;
+        border: none; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        display: flex; align-items: center; justify-content: center; font-size: 18px;
+        transition: background-color 0.2s, opacity 0.2s; position: relative;
+      `;
+      btn.onmouseover = () => { if (!btn.disabled) btn.style.background = hoverBg; };
+      btn.onmouseout = () => { if (!btn.disabled) btn.style.background = bg; };
+      btn.setLoading = (loading) => {
+        btn.disabled = loading;
+        btn.style.opacity = loading ? '0.7' : '1';
+        btn.style.cursor = loading ? 'wait' : 'pointer';
+        btn.innerHTML = loading ? '<div style="width:16px;height:16px;border:2px solid #fff;border-top:2px solid transparent;border-radius:50%;animation:fab-spin 1s linear infinite;"></div>' : btn._emoji;
+      };
+      return btn;
+    }
+
+    const summarizeFab = makeFab('✨', '#5C5CFF', '#4A4AD9', 'Summarize');
+    const draftFab = makeFab('✒️', '#55BF55', '#45A545', 'Draft response');
+    const ccFab = makeFab('🖥️', '#333', '#444', 'Open in Claude Code');
+
     summarizeFab.onclick = () => {
       const selectedText = window.getSelection().toString();
       if (!selectedText) return;
@@ -553,38 +583,32 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
         state.models[m.id].inProgress = true;
       });
       state.waitingForFirstToken = true;
-
-      summarizeFab.disabled = true;
-      summarizeFab.innerHTML = '⏳';
-      summarizeFab.style.cursor = 'wait';
-
+      summarizeFab.setLoading(true);
       chrome.runtime.sendMessage({ action: 'summarizeDual', text: selectedText });
     };
 
-    const draftFab = document.createElement('button');
-    draftFab.className = 'fab';
-    draftFab.innerHTML = '✒️';
-    draftFab.title = 'Draft response';
-    draftFab.style.cssText = `
-      position: fixed; top: 20px; left: 50%; transform: translateX(5px);
-      width: 40px; height: 40px; border-radius: 50%; background: #55BF55; color: white;
-      border: none; cursor: pointer; z-index: 10000; box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-      display: none; align-items: center; justify-content: center; font-size: 18px;
-    `;
     draftFab.onclick = () => {
       const selectedText = window.getSelection().toString();
       if (!selectedText) return;
       chrome.runtime.sendMessage({ action: 'draft', text: selectedText });
     };
 
+    ccFab.onclick = () => {
+      const selectedText = window.getSelection().toString();
+      if (!selectedText) return;
+      ccFab.setLoading(true);
+      chrome.runtime.sendMessage({ action: 'openInCC', text: selectedText });
+    };
+
     document.addEventListener('selectionchange', () => {
       const selection = window.getSelection().toString().trim();
-      summarizeFab.style.display = selection ? 'flex' : 'none';
-      draftFab.style.display = selection ? 'flex' : 'none';
+      fabContainer.style.display = selection ? 'flex' : 'none';
     });
 
-    document.body.appendChild(summarizeFab);
-    document.body.appendChild(draftFab);
+    fabContainer.appendChild(summarizeFab);
+    fabContainer.appendChild(draftFab);
+    fabContainer.appendChild(ccFab);
+    document.body.appendChild(fabContainer);
   }
 
   // Message listener
@@ -631,12 +655,8 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
       // Show panel on first token
       if (state.waitingForFirstToken) {
         state.waitingForFirstToken = false;
-        const fab = document.querySelector('.fab[title="Summarize selection"]');
-        if (fab) {
-          fab.disabled = false;
-          fab.innerHTML = '✨';
-          fab.style.cursor = 'pointer';
-        }
+        const fab = document.querySelector('.fab[title="Summarize"]');
+        if (fab && fab.setLoading) fab.setLoading(false);
         createDualTabPanel();
       }
 
@@ -691,6 +711,13 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
         updateContentDisplay();
       }
       updateBadge(modelId);
+    }
+
+    // Open in CC complete/error
+    if (request.action === 'openInCCComplete' || request.action === 'openInCCError') {
+      const fab = document.querySelector('.fab[title="Open in Claude Code"]');
+      if (fab && fab.setLoading) fab.setLoading(false);
+      if (request.action === 'openInCCError') console.error('Open in CC error:', request.error);
     }
 
     // Set transcript

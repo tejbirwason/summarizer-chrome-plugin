@@ -10,7 +10,9 @@ Supports multiple models via LiteLLM abstraction
 """
 import datetime
 import json
+import os
 import struct
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -63,7 +65,12 @@ def handle_request(data):
     if 'reasoning' in model_config and 'openai' in model_config['litellm_model']:
         params['reasoning_effort'] = model_config['reasoning']
 
-    log_message(f"LiteLLM params: model={params['model']}, max_tokens={params['max_tokens']}")
+    # Add extended thinking for Anthropic models
+    if 'thinking' in model_config and 'anthropic' in model_config['litellm_model']:
+        params['thinking'] = model_config['thinking']
+
+    thinking_info = f", thinking={params.get('thinking')}" if 'thinking' in params else ""
+    log_message(f"LiteLLM params: model={params['model']}, max_tokens={params['max_tokens']}{thinking_info}")
 
     start_time = time.time()
     full_response = ""
@@ -104,6 +111,32 @@ def handle_request(data):
             "error": error_msg
         })
 
+def handle_open_in_cc(data):
+    """Write text to temp file and open Claude Code in a new Ghostty window"""
+    text = data.get('text', '')
+    prompt = data.get('prompt', 'Summarize and extract key insights. Start with TLDR, then distinctive perspectives, reasoning patterns, and sticky quotes.')
+
+    timestamp = int(time.time())
+    filepath = f"/tmp/cc-summarize-{timestamp}.txt"
+
+    with open(filepath, 'w') as f:
+        f.write(text)
+
+    log_message(f"Wrote {len(text)} chars to {filepath}")
+
+    # Use y() function from zshrc (claude --dangerously-skip-permissions)
+    cc_cmd = f'source ~/.zshrc 2>/dev/null; y "Summarize and extract key insights from this transcript: {filepath}"'
+
+    # Launch in new Ghostty window via macOS open command
+    subprocess.Popen(
+        ['open', '-na', 'Ghostty.app', '--args', '-e', 'zsh', '-c', cc_cmd],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
+
+    log_message(f"Launched Ghostty with CC for {filepath}")
+    send_message({"type": "complete", "action": "openInCC", "filepath": filepath})
+
 def main():
     """Main loop for native messaging"""
     log_message("Local AI Handler (LiteLLM) started")
@@ -120,6 +153,8 @@ def main():
 
             if action in ('summarize', 'followup'):
                 handle_request(msg)
+            elif action == 'openInCC':
+                handle_open_in_cc(msg)
             elif action == 'health':
                 send_message({"status": "healthy", "service": "Local AI Handler (LiteLLM)"})
             else:

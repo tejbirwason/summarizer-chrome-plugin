@@ -1,103 +1,81 @@
 function createSummaryButton() {
-  // Look for the top bar actions container (search bar area)
-  const topBar = document.querySelector('#container.ytd-searchbox') || 
+  const topBar = document.querySelector('#container.ytd-searchbox') ||
                  document.querySelector('#center.ytd-masthead') ||
                  document.querySelector('ytd-masthead #end');
-  
-  if (!topBar || document.querySelector('#yt-summarize-btn')) return;
 
-  const button = document.createElement('button');
-  button.id = 'yt-summarize-btn';
-  button.innerHTML = '✨ Summarize';
-  button.style.cssText = `
-    position: fixed;
-    top: 70px;
-    right: 20px;
-    z-index: 9999;
-    padding: 10px 20px;
-    background: #5C5CFF;
-    color: white;
-    border: none;
-    border-radius: 20px;
-    cursor: pointer;
-    font-family: Roboto, Arial, sans-serif;
-    font-size: 14px;
-    font-weight: 500;
-    line-height: 20px;
-    display: inline-flex;
-    align-items: center;
-    transition: background-color 0.2s;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-  `;
-  
-  button.onmouseover = () => {
-    button.style.background = '#4A4AD9';
-  };
-  
-  button.onmouseout = () => {
-    button.style.background = '#5C5CFF';
-  };
+  if (!topBar || document.querySelector('#yt-btn-container')) return;
 
-  const spinner = document.createElement('div');
-  spinner.style.cssText = `
-    display: none;
-    width: 12px;
-    height: 12px;
-    border: 2px solid #ffffff;
-    border-top: 2px solid transparent;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-    margin-right: 6px;
-  `;
-
+  // Spinner keyframe
   const style = document.createElement('style');
   style.textContent = `
-    @keyframes spin {
+    @keyframes yt-btn-spin {
       0% { transform: rotate(0deg); }
       100% { transform: rotate(360deg); }
     }
   `;
   document.head.appendChild(style);
 
-  button.prepend(spinner);
+  // Container for both buttons
+  const container = document.createElement('div');
+  container.id = 'yt-btn-container';
+  container.style.cssText = `
+    position: fixed; top: 70px; right: 20px; z-index: 9999;
+    display: flex; gap: 8px;
+  `;
 
-  button.onclick = () => {
+  function makeButton(id, emoji, bg, hoverBg) {
+    const btn = document.createElement('button');
+    btn.id = id;
+    btn.innerHTML = emoji;
+    btn.style.cssText = `
+      width: 44px; height: 44px; border-radius: 50%; background: ${bg}; color: white;
+      border: none; cursor: pointer; font-size: 20px; display: flex; align-items: center;
+      justify-content: center; transition: background-color 0.2s, opacity 0.2s;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2); position: relative;
+    `;
+    btn.onmouseover = () => { if (!btn.disabled) btn.style.background = hoverBg; };
+    btn.onmouseout = () => { if (!btn.disabled) btn.style.background = bg; };
+
+    btn._emoji = emoji;
+    btn._bg = bg;
+    btn.setLoading = (loading) => {
+      btn.disabled = loading;
+      btn.style.opacity = loading ? '0.7' : '1';
+      btn.innerHTML = loading ? '<div style="width:18px;height:18px;border:2px solid #fff;border-top:2px solid transparent;border-radius:50%;animation:yt-btn-spin 1s linear infinite;"></div>' : btn._emoji;
+    };
+    return btn;
+  }
+
+  const summarizeBtn = makeButton('yt-summarize-btn', '✨', '#5C5CFF', '#4A4AD9');
+  const ccBtn = makeButton('yt-cc-btn', '🖥️', '#333', '#444');
+
+  summarizeBtn.title = 'Summarize';
+  ccBtn.title = 'Open in Claude Code';
+
+  summarizeBtn.onclick = () => {
     const videoId = new URLSearchParams(window.location.search).get('v');
     if (!videoId) return;
-
-    spinner.style.display = 'inline-block';
-    button.disabled = true;
-    button.style.opacity = '0.7';
-
-    // Update button text while loading
-    const textNode = button.childNodes[1];
-    if (textNode) textNode.textContent = ' Summarizing Video...';
-
-    chrome.runtime.sendMessage({
-      action: 'summarizeVideo',
-      videoId: videoId,
-    });
+    summarizeBtn.setLoading(true);
+    chrome.runtime.sendMessage({ action: 'summarizeVideo', videoId });
   };
 
-  // Add button to the page body (since it's fixed position)
-  document.body.appendChild(button);
+  ccBtn.onclick = () => {
+    const videoId = new URLSearchParams(window.location.search).get('v');
+    if (!videoId) return;
+    ccBtn.setLoading(true);
+    chrome.runtime.sendMessage({ action: 'openVideoInCC', videoId });
+  };
 
-  // Listen for summary completion (both old and new dual-mode messages)
+  container.appendChild(summarizeBtn);
+  container.appendChild(ccBtn);
+  document.body.appendChild(container);
+
   chrome.runtime.onMessage.addListener((request) => {
-    if (
-      request.action === 'displaySummary' ||
-      request.action === 'updateSummary' ||
-      request.action === 'updateFastSummary' ||
-      request.action === 'updateDeepSummary' ||
-      request.action === 'summaryError'
-    ) {
-      spinner.style.display = 'none';
-      button.disabled = false;
-      button.style.opacity = '1';
-
-      // Reset button text
-      const textNode = button.childNodes[1];
-      if (textNode) textNode.textContent = ' Summarize';
+    if (['displaySummary', 'updateSummary', 'updateFastSummary', 'updateDeepSummary', 'summaryError'].includes(request.action)) {
+      summarizeBtn.setLoading(false);
+    }
+    if (request.action === 'openInCCComplete' || request.action === 'openInCCError') {
+      ccBtn.setLoading(false);
     }
   });
 }
@@ -118,19 +96,17 @@ new MutationObserver(() => {
   if (url !== lastUrl) {
     lastUrl = url;
     if (window.location.pathname === '/watch') {
-      setTimeout(createSummaryButton, 500); // Small delay to ensure DOM is ready
+      setTimeout(createSummaryButton, 500);
     }
   }
 }).observe(document, {subtree: true, childList: true});
 
-// Handle browser back/forward navigation
 window.addEventListener('popstate', () => {
   if (window.location.pathname === '/watch') {
     createSummaryButton();
   }
 });
 
-// Initial check on load
 if (window.location.pathname === '/watch') {
   createSummaryButton();
 }
