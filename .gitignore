@@ -62,3 +62,7 @@ coverage/
 __pycache__/
 *.py[cod]
 *.pyc
+
+# Generated test artifacts
+playwright-report/
+test-results/
