@@ -1,7 +1,7 @@
 {
   "name": "com.ytsummary",
   "description": "YouTube Summary Host",
-  "path": "/Users/tjwason/summarizer-chrome-plugin/yt-summary.py",
+  "path": "__REPO_PATH__/yt-summary.py",
   "type": "stdio",
-  "allowed_origins": ["chrome-extension://ebhjcabpoikcfhoadolmbcnpepbkmmec/"]
+  "allowed_origins": ["chrome-extension://__EXTENSION_ID__/"]
 }

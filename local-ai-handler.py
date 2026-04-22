@@ -1,4 +1,4 @@
-#!/Users/tjwason/.pyenv/versions/3.11.13/bin/python3
+#!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.11"
 # dependencies = ["litellm", "python-dotenv"]
@@ -124,12 +124,15 @@ def handle_open_in_cc(data):
 
     log_message(f"Wrote {len(text)} chars to {filepath}")
 
-    # Use y() function from zshrc (claude --dangerously-skip-permissions)
-    cc_cmd = f'source ~/.zshrc 2>/dev/null; y "Summarize and extract key insights from this transcript: {filepath}"'
+    # Invoke claude directly with absolute path (non-interactive zsh under Ghostty's
+    # login env doesn't source .zshrc, so PATH additions aren't available)
+    cc_cmd = f'$HOME/.local/bin/claude --dangerously-skip-permissions "Summarize and extract key insights from this transcript: {filepath}"'
 
     # Launch in new Ghostty window via macOS open command
     subprocess.Popen(
-        ['open', '-na', 'Ghostty.app', '--args', '-e', 'zsh', '-c', cc_cmd],
+        ['open', '-na', '/Applications/Ghostty.app', '--args',
+         '--quit-after-last-window-closed=true',
+         '-e', 'zsh', '-c', cc_cmd],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL
     )

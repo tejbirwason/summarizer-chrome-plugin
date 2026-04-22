@@ -1,4 +1,4 @@
-#!/Users/tjwason/.pyenv/versions/3.11.13/bin/python3
+#!/usr/bin/env python3
 import datetime
 import json
 import os

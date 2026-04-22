@@ -14,43 +14,26 @@ A Chrome extension that provides AI-powered text summarization and response draf
 
 ## Installation
 
-1. Clone this repository
+1. Clone this repository.
+
 2. **Set up API keys**:
-   - For extension (Claude API):
-     - Copy `config.example.js` to `config.js`: `cp config.example.js config.js`
-     - Edit `config.js` and add your Anthropic API key
-   - For local AI handler (summarization via LiteLLM):
-     - Copy `.env.example` to `.env`: `cp .env.example .env`
-     - Edit `.env` and add API keys for your configured providers (e.g., `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`)
-   - Both files are gitignored and won't be committed
-3. Install Python dependencies:
+   - `cp config.example.js config.js` → add your Anthropic API key (used for the ✒️ draft flow in the browser)
+   - `cp .env.example .env` → add `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and (optional) Webshare proxy creds for YouTube
+   - Both files are gitignored.
+
+3. **Load the extension**:
+   - Open `chrome://extensions/`, enable **Developer mode**, click **Load unpacked**, select this directory
+   - Copy the extension ID from the extension card (e.g. `fbmgekimgmgiiffchlkfknehmgmiphaf`)
+
+4. **Run the install script** with that ID:
    ```bash
-   pip3 install -r requirements.txt
+   scripts/install.sh <EXTENSION_ID>
    ```
-4. Open Chrome and navigate to `chrome://extensions/`
-5. Enable "Developer mode" in the top right
-6. Click "Load unpacked" and select the extension directory
+   It installs Python deps, marks the Python hosts executable, renders `com.localai.json` + `com.ytsummary.json` with your repo path and extension ID, and copies them into Chrome's `NativeMessagingHosts` directory.
 
-### Native Messaging Setup (Required for summarization)
+5. **Fully quit Chrome (cmd+Q) and relaunch.** A plain extension reload doesn't pick up native-messaging manifest changes.
 
-To enable text summarization and YouTube video summarization:
-
-1. Copy native messaging manifests to Chrome's directory:
-   ```bash
-   cp com.ytsummary.json ~/Library/Application\ Support/Google/Chrome/NativeMessagingHosts/
-   cp com.localai.json ~/Library/Application\ Support/Google/Chrome/NativeMessagingHosts/
-   ```
-
-2. Update extension IDs in manifests if needed (get ID from chrome://extensions)
-
-3. Make Python scripts executable:
-   ```bash
-   chmod +x yt-summary.py local-ai-handler.py
-   ```
-
-4. Restart Chrome completely
-
-See `NATIVE_MESSAGING_SETUP.md` for detailed troubleshooting.
+See `NATIVE_MESSAGING_SETUP.md` for troubleshooting.
 
 ## Usage
 
