@@ -126,7 +126,7 @@ def handle_open_in_cc(data):
 
     # Invoke claude directly with absolute path (non-interactive zsh under Ghostty's
     # login env doesn't source .zshrc, so PATH additions aren't available)
-    cc_cmd = f'$HOME/.local/bin/claude --dangerously-skip-permissions "Summarize and extract key insights from this transcript: {filepath}"'
+    cc_cmd = f'$HOME/.local/bin/claude --dangerously-skip-permissions --append-system-prompt "You are a transcript summarizer" "Summarize and extract key insights from this transcript: {filepath}"'
 
     # Launch in new Ghostty window via macOS open command
     subprocess.Popen(
