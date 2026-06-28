@@ -246,7 +246,7 @@ async function getVideoTranscriptAndSummarize(videoId, tab) {
 }
 
 // Open in Claude Code (via Ghostty)
-async function openInClaudeCode(text, tab) {
+async function openInClaudeCode(text, tab, title = '', videoId = '', channel = '', url = '') {
   const port = chrome.runtime.connectNative('com.localai');
 
   port.onMessage.addListener(async (response) => {
@@ -265,11 +265,11 @@ async function openInClaudeCode(text, tab) {
     }
   });
 
-  port.postMessage({ action: 'openInCC', text: text });
+  port.postMessage({ action: 'openInCC', text: text, title: title, video_id: videoId, channel: channel, url: url });
 }
 
 // Open YouTube video transcript in Claude Code
-async function openVideoInClaudeCode(videoId, tab) {
+async function openVideoInClaudeCode(videoId, tab, title = '', channel = '', url = '') {
   try {
     const nativeResponse = await chrome.runtime.sendNativeMessage(
       'com.ytsummary',
@@ -280,7 +280,7 @@ async function openVideoInClaudeCode(videoId, tab) {
       throw new Error(nativeResponse.text || 'No transcript received');
     }
 
-    await openInClaudeCode(nativeResponse.text, tab);
+    await openInClaudeCode(nativeResponse.text, tab, title, videoId, channel, url);
   } catch (error) {
     console.error('Error fetching video transcript for CC:', error);
     await safeSend(tab, {
@@ -381,7 +381,7 @@ function handleRequest(request, sender, sendResponse) {
   }
 
   if (request.action === 'openVideoInCC') {
-    openVideoInClaudeCode(request.videoId, tab);
+    openVideoInClaudeCode(request.videoId, tab, request.title || '', request.channel || '', request.url || '');
     return true;
   }
 

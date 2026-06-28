@@ -11,6 +11,8 @@ Supports multiple models via LiteLLM abstraction
 import datetime
 import json
 import os
+import re
+import shlex
 import struct
 import subprocess
 import sys
@@ -22,6 +24,23 @@ from litellm import completion
 
 # Load environment variables
 load_dotenv()
+
+# Native-host PATH is minimal (/usr/bin:/bin:/usr/sbin:/sbin), so call CLIs by absolute path.
+SC_BIN = os.path.expanduser("~/.superconductor/bin/sc")      # Superconductor CLI
+CLAUDE_BIN = os.path.expanduser("~/.local/bin/claude")        # Claude Code CLI (Ghostty fallback)
+# Transcripts are archived here; this folder is added to Superconductor as a project.
+TRANSCRIPTS_DIR = Path.home() / "yt-transcripts"
+
+# ai-config.json sits next to this script. Its "openInClaudeCode" block configures the
+# transcript prompt, system prompt, model, and reasoning for the "Open in Claude Code" path.
+# Edit that file to change them — no code change or native-host restart required.
+CONFIG_PATH = Path(__file__).resolve().parent / "ai-config.json"
+OPEN_IN_CC_DEFAULTS = {
+    "model": "claude-opus-4-8",
+    "reasoning": "max",
+    "systemPrompt": "You are a transcript summarizer",
+    "prompt": "Read the transcript at {ref}, summarize it and extract the key insights.",
+}
 
 def log_message(message):
     """Log messages to file for debugging"""
@@ -111,34 +130,128 @@ def handle_request(data):
             "error": error_msg
         })
 
+def slugify(s, max_len=40):
+    """Lowercase, ASCII-only, hyphenated slug suitable for a filename."""
+    s = re.sub(r'[^\w\s-]', '', s, flags=re.ASCII).strip().lower()
+    s = re.sub(r'[-\s]+', '-', s)
+    return s[:max_len].rstrip('-')
+
+
+def yaml_str(s):
+    """Quote a value for safe YAML frontmatter (handles colons and quotes)."""
+    return '"' + str(s).replace('\\', '\\\\').replace('"', '\\"') + '"'
+
+
+def open_in_cc_config():
+    """Read the 'openInClaudeCode' block from ai-config.json fresh on each call, so edits to
+    the file take effect on the next click without restarting the native host. Missing keys
+    (or an unreadable/invalid file) fall back to OPEN_IN_CC_DEFAULTS."""
+    cfg = dict(OPEN_IN_CC_DEFAULTS)
+    try:
+        cfg.update(json.loads(CONFIG_PATH.read_text()).get("openInClaudeCode", {}))
+    except (OSError, json.JSONDecodeError) as e:
+        log_message(f"Could not load openInClaudeCode config ({e}); using defaults")
+    return cfg
+
+
+def summarize_prompt(template, ref):
+    """Fill the configured transcript-summarization instruction with the transcript path.
+    Uses .replace (not .format) so other braces in a user-edited prompt are left alone."""
+    return template.replace("{ref}", ref)
+
 def handle_open_in_cc(data):
-    """Write text to temp file and open Claude Code in a new Ghostty window"""
+    """Archive the transcript to TRANSCRIPTS_DIR (named by video title) and open a fresh
+    terminal-backed Claude Code tab on it in the dedicated yt-transcripts Superconductor
+    workspace (kept open on main), without stealing focus from the workspace you're in. Falls
+    back to an in-app chat, then to the Claude CLI in a Ghostty window if SC is unavailable."""
     text = data.get('text', '')
-    prompt = data.get('prompt', 'Summarize and extract key insights. Start with TLDR, then distinctive perspectives, reasoning patterns, and sticky quotes.')
+    title = data.get('title', '')
+    video_id = data.get('video_id', '')
+    channel = data.get('channel', '')
+    url = data.get('url', '') or f"https://youtube.com/watch?v={video_id}"
 
-    timestamp = int(time.time())
-    filepath = f"/tmp/cc-summarize-{timestamp}.txt"
+    # Filename: <epoch>-<title-slug>-<videoId>.md — epoch prefix sorts chronologically
+    # (lexically too: the 10-digit width is stable until year 2286). Human date stays in frontmatter.
+    date = datetime.date.today().isoformat()
+    ts = int(time.time())
+    base = slugify(title) if title else 'untitled'
+    fname = f"{ts}-{base}{('-' + video_id) if video_id else ''}.md"
 
-    with open(filepath, 'w') as f:
-        f.write(text)
-
+    TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
+    filepath = TRANSCRIPTS_DIR / fname
+    filepath.write_text(
+        f"---\ntitle: {yaml_str(title)}\nchannel: {yaml_str(channel)}\nurl: {url}\nfetched: {date}\n---\n\n{text}"
+    )
     log_message(f"Wrote {len(text)} chars to {filepath}")
 
-    # Invoke claude directly with absolute path (non-interactive zsh under Ghostty's
-    # login env doesn't source .zshrc, so PATH additions aren't available)
-    cc_cmd = f'$HOME/.local/bin/claude --dangerously-skip-permissions --append-system-prompt "You are a transcript summarizer" "Summarize and extract key insights from this transcript: {filepath}"'
+    cfg = open_in_cc_config()
+    model, reasoning, system_prompt = cfg["model"], cfg["reasoning"], cfg["systemPrompt"]
+    prompt_rel = summarize_prompt(cfg["prompt"], fname)            # relative — only the --worktree-bound chat fallback uses this
+    prompt_abs = summarize_prompt(cfg["prompt"], str(filepath))    # absolute — robust regardless of the tab's working dir
 
-    # Launch in new Ghostty window via macOS open command
+    sc_ok = Path(SC_BIN).exists() and subprocess.run([SC_BIN, 'status'], capture_output=True).returncode == 0
+
+    # Primary: a fresh terminal-backed Claude Code tab per transcript, in the dedicated
+    # yt-transcripts workspace (must be open in SC). --active keep so it lands there without
+    # pulling focus off whatever workspace you're currently in.
+    if sc_ok:
+        run = subprocess.run(
+            [SC_BIN, 'layout', 'run', 'tabs', '--provider', 'claude', '--ui', 'terminal',
+             '--model', model, '--reasoning', reasoning,
+             '--worktree', str(TRANSCRIPTS_DIR), '--active', 'keep',
+             '--label', (title or base)[:40], '--prompt', prompt_abs, '--output', 'json'],
+            capture_output=True, text=True,
+        )
+        sid = None
+        if run.returncode == 0:
+            try:
+                resp = json.loads(run.stdout)
+                if resp.get('kind') == 'layout_orchestration':
+                    sid = resp['response']['sessions'][0].get('session_id')
+            except (json.JSONDecodeError, KeyError, IndexError):
+                sid = None
+        if sid:
+            log_message(f"Opened terminal CC tab {sid} for {fname}")
+            send_message({"type": "complete", "action": "openInCC", "filepath": str(filepath)})
+            return
+        log_message(f"sc layout run blocked (rc={run.returncode}): {run.stdout.strip() or run.stderr.strip()} — falling back to chat")
+
+        # Fallback 1: in-app Opus 4.8 chat bound to the transcripts project (no orchestration flag / open workspace needed).
+        new = subprocess.run(
+            [SC_BIN, 'chat', 'new', '--provider', 'claude', '--model', model,
+             '--reasoning', reasoning, '--activate', '--worktree', str(TRANSCRIPTS_DIR)],
+            capture_output=True, text=True,
+        )
+        csid = new.stdout.strip()
+        if new.returncode == 0 and csid:
+            send = subprocess.run(
+                [SC_BIN, 'chat', 'send', csid, prompt_rel],
+                capture_output=True, text=True,
+            )
+            if send.returncode == 0:
+                log_message(f"Opened Opus 4.8 chat {csid} on {fname}")
+                send_message({"type": "complete", "action": "openInCC", "filepath": str(filepath)})
+                return
+            log_message(f"sc chat send failed (rc={send.returncode}): {send.stderr.strip()} — falling back to Ghostty")
+        else:
+            log_message(f"sc chat new failed (rc={new.returncode}): {new.stderr.strip()} — falling back to Ghostty")
+    else:
+        log_message("Superconductor unavailable (sc status failed) — falling back to Ghostty")
+
+    # Fallback 2: launch the Claude CLI on the transcript in a Ghostty window.
+    cc_cmd = (
+        f'{CLAUDE_BIN} --dangerously-skip-permissions '
+        f'--append-system-prompt {shlex.quote(system_prompt)} {shlex.quote(prompt_abs)}'
+    )
     subprocess.Popen(
         ['open', '-na', '/Applications/Ghostty.app', '--args',
          '--quit-after-last-window-closed=true',
          '-e', 'zsh', '-c', cc_cmd],
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
+        stderr=subprocess.DEVNULL,
     )
-
-    log_message(f"Launched Ghostty with CC for {filepath}")
-    send_message({"type": "complete", "action": "openInCC", "filepath": filepath})
+    log_message(f"Launched Ghostty fallback for {filepath}")
+    send_message({"type": "complete", "action": "openInCC", "filepath": str(filepath)})
 
 def main():
     """Main loop for native messaging"""
