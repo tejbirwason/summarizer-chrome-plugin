@@ -91,7 +91,22 @@
       Summaries are cached to save API calls and improve performance. 
       Cached summaries are automatically removed after 30 days.
     </p>
-    <button id="clearAllBtn" class="danger">Clear All Cached Summaries</button>
+    
+  <h2>Cloud Worker</h2>
+  <p style="color:#666;font-size:13px">
+    Summaries, posters and history live in a Cloudflare Worker. Paste the endpoint and app token
+    once — no Python, no native host.
+  </p>
+  <label style="display:block;margin:8px 0 4px">Worker endpoint</label>
+  <input id="workerBase" type="text" style="width:100%;padding:8px;box-sizing:border-box"
+         placeholder="https://summarizer.goldenoreo.workers.dev" />
+  <label style="display:block;margin:8px 0 4px">App token</label>
+  <input id="workerToken" type="password" style="width:100%;padding:8px;box-sizing:border-box"
+         placeholder="APP_TOKEN" autocomplete="off" />
+  <button id="saveWorker" style="margin-top:10px">Save & test</button>
+  <span id="workerStatus" style="margin-left:10px;font-size:13px"></span>
+  <hr style="margin:24px 0" />
+<button id="clearAllBtn" class="danger">Clear All Cached Summaries</button>
     <div id="status"></div>
   </div>
   

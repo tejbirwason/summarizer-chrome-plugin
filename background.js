@@ -13,6 +13,35 @@ try {
   console.warn('config.js not found. Using default values.');
 }
 
+// ===========================================================================================
+// Cloud Worker. Summarization, poster generation and durable storage all live in a Cloudflare
+// Worker + Durable Object now, so no native-messaging host is required to run this extension.
+// The endpoint + token are set once in the options page.
+// ===========================================================================================
+
+const WORKER_DEFAULTS = { base: 'https://summarizer.goldenoreo.workers.dev', token: '' };
+
+async function workerCreds() {
+  const s = await chrome.storage.local.get(['worker:base', 'worker:token']);
+  return {
+    base: (s['worker:base'] || WORKER_DEFAULTS.base).replace(/\/$/, ''),
+    token: s['worker:token'] || WORKER_DEFAULTS.token,
+  };
+}
+
+async function api(path, opts = {}) {
+  const { base, token } = await workerCreds();
+  if (!base || !token) throw new Error('Worker endpoint/token not configured (see extension options)');
+  const res = await fetch(`${base}${path}`, {
+    ...opts,
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(opts.headers || {}) },
+  });
+  const text = await res.text();
+  let body; try { body = JSON.parse(text); } catch { body = { raw: text }; }
+  if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+  return body;
+}
+
 // AI Config (loaded from ai-config.json)
 let aiConfig = null;
 let configLoaded = false;
@@ -250,7 +279,13 @@ function buildUserContent(prompt, job) {
 // ===========================================================================================
 
 // `tab` is only the *relay* target; the job accumulates regardless of whether the relay lands.
-function streamModel(job, tab, modelId, { isFollowup }) {
+// Deltas now arrive from the Worker's SSE stream rather than a native port. Everything
+// downstream is unchanged: this function still accumulates into the job cache and relays the
+// same updateSummary / summaryComplete / summaryError messages, so content-dual.js is
+// untouched. The DURABLE copy of the generation lives in the Durable Object — this local job
+// is only a render cache now, and the summary completes and persists in D1 even if this
+// service worker is torn down mid-stream.
+async function streamModel(job, tab, modelId, { isFollowup, prompt } = {}) {
   const modelConfig = findModel(modelId);
   const m = ensureModel(job, modelId);
   m.inProgress = true;
@@ -258,85 +293,99 @@ function streamModel(job, tab, modelId, { isFollowup }) {
   m.usedModel = metaOf(modelConfig);
   job.activeModelId = modelId;
 
-  const port = chrome.runtime.connectNative('com.localai');
+  const { base, token } = await workerCreds();
+  if (!base || !token) {
+    m.inProgress = false;
+    await safeSend(tab, { action: 'summaryError', url: job.url, modelId,
+      error: 'Worker not configured — set the endpoint and token in the extension options.' });
+    return;
+  }
 
-  // Idle watchdog: a stuck LiteLLM/OpenRouter call (seen in the wild — the native process blocks
-  // on completion() and never yields a chunk) would otherwise spin the panel forever. Reset on
-  // every delta so a slow-but-progressing generation is never killed; only true silence trips it.
-  // The window is generous because a reasoning model legitimately emits nothing for 20–40s first.
-  const IDLE_MS = 150000;
-  let watchdog = null;
-  const disarm = () => { if (watchdog) { clearTimeout(watchdog); watchdog = null; } };
-  const arm = () => { disarm(); watchdog = setTimeout(onHang, IDLE_MS); };
-  const onHang = async () => {
-    watchdog = null;
+  const jobId = encodeURIComponent(job.url);
+  const started = Date.now();
+
+  try {
+    // Kick the job off (or continue it), then subscribe. The POST returns as soon as the DO
+    // has started work — it does NOT wait for the generation, which is what lets the summary
+    // survive this tab (or this whole service worker) going away.
+    if (isFollowup) {
+      const last = m.messages[m.messages.length - 1];
+      await api(`/api/job/${jobId}/followup`, { method: 'POST',
+        body: JSON.stringify({ question: last?.content ?? '' }) });
+    } else if (job.startedRemote) {
+      await api(`/api/job/${jobId}/regenerate`, { method: 'POST',
+        body: JSON.stringify({ modelId, prompt: prompt ?? job.prompt }) });
+    } else {
+      await api('/api/summarize', { method: 'POST', body: JSON.stringify({
+        url: job.fullUrl || job.url, title: job.title,
+        kind: job.isTranscript ? 'video' : 'page', videoId: job.videoId,
+        text: job.sourceText, modelId, prompt: prompt ?? job.prompt,
+      }) });
+      job.startedRemote = true;
+    }
+
+    const res = await fetch(`${base}/api/job/${jobId}/stream`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok || !res.body) throw new Error(`stream ${res.status}`);
+
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const frames = buf.split('\n\n');
+      buf = frames.pop() ?? '';
+
+      for (const f of frames) {
+        const ev = /^event: (.+)$/m.exec(f)?.[1];
+        const dataLine = /^data: (.+)$/m.exec(f)?.[1];
+        if (!ev || !dataLine) continue;
+        let d; try { d = JSON.parse(dataLine); } catch { continue; }
+
+        if (ev === 'snapshot') {
+          // Reconnect: adopt whatever the DO already has so a panel that attaches late
+          // isn't missing the head of the summary.
+          if (d.content && d.content.length > m.streaming.length) m.streaming = d.content;
+        } else if (ev === 'delta' && d.modelId === modelId) {
+          m.streaming += d.text;
+          schedulePersist(job.url);
+          await safeSend(tab, { action: 'updateSummary', url: job.url, modelId,
+            delta: d.text, streamingLength: m.streaming.length });
+        } else if (ev === 'complete' && d.modelId === modelId) {
+          m.inProgress = false;
+          m.complete = true;
+          m.duration = d.durationMs ?? Date.now() - started;
+          if (d.usedModel) m.usedModel = d.usedModel;
+          m.messages.push({ role: 'assistant', content: d.content });
+          m.streaming = '';
+          await persistJob(job.url);
+          await safeSend(tab, { action: 'summaryComplete', url: job.url, modelId,
+            message: { role: 'assistant', content: d.content }, duration: m.duration });
+          reader.cancel().catch(() => {});
+          return;
+        } else if (ev === 'error' && d.modelId === modelId) {
+          throw new Error(d.error);
+        } else if (ev === 'poster' && d.state === 'complete') {
+          job.posterKey = d.key;
+          await persistJob(job.url);
+          await safeSend(tab, { action: 'posterReady', url: job.url, key: d.key });
+        }
+      }
+    }
+  } catch (e) {
     m.inProgress = false;
     m.streaming = '';
-    if (isFollowup && m.messages.length && m.messages[m.messages.length - 1].role === 'user') m.messages.pop();
-    await persistJob(job.url);
-    await safeSend(tab, { action: 'summaryError', url: job.url, modelId, error: 'The model did not respond in time. Please try again.' });
-    try { port.disconnect(); } catch (e) {}
-  };
-  arm();
-
-  port.onMessage.addListener(async (response) => {
-    if (response.type === 'delta') {
-      arm();
-      m.streaming += response.delta;
-      schedulePersist(job.url);
-      await safeSend(tab, {
-        action: 'updateSummary',
-        url: job.url,
-        modelId,
-        delta: response.delta,
-        streamingLength: m.streaming.length   // lets a reconnecting panel detect gaps
-      });
-    } else if (response.type === 'complete') {
-      disarm();
-      m.inProgress = false;
-      m.complete = true;
-      m.duration = response.duration_ms;
-      m.messages.push({ role: 'assistant', content: response.response });
-      m.streaming = '';
-      await persistJob(job.url);
-      await safeSend(tab, {
-        action: 'summaryComplete',
-        url: job.url,
-        modelId,
-        message: { role: 'assistant', content: response.response },
-        duration: response.duration_ms
-      });
-      port.disconnect();
-    } else if (response.type === 'error') {
-      disarm();
-      m.inProgress = false;
-      m.streaming = '';
-      // On a failed followup, drop the user turn we optimistically pushed so a retry is clean.
-      if (isFollowup && m.messages.length && m.messages[m.messages.length - 1].role === 'user') {
-        m.messages.pop();
-      }
-      await persistJob(job.url);
-      await safeSend(tab, {
-        action: 'summaryError',
-        url: job.url,
-        modelId,
-        error: response.error
-      });
-      port.disconnect();
+    // On a failed followup, drop the user turn we optimistically pushed so a retry is clean.
+    if (isFollowup && m.messages.length && m.messages[m.messages.length - 1].role === 'user') {
+      m.messages.pop();
     }
-  });
-
-  port.onDisconnect.addListener(() => {
-    disarm();
-    if (chrome.runtime.lastError) console.error('Native messaging error:', chrome.runtime.lastError);
-  });
-
-  port.postMessage({
-    action: isFollowup ? 'followup' : 'summarize',
-    modelId,
-    modelConfig,
-    messages: m.messages
-  });
+    await persistJob(job.url);
+    await safeSend(tab, { action: 'summaryError', url: job.url, modelId, error: String(e.message || e) });
+  }
 }
 
 // Start (or restart) a page's summary from scratch. Creates a fresh job, so re-summarizing a
@@ -502,8 +551,13 @@ async function getVideoTranscriptAndSummarize(request, tab) {
   });
 
   try {
-    const nativeResponse = await chrome.runtime.sendNativeMessage('com.ytsummary', { video_id: videoId });
-    const transcript = extractTranscriptText(nativeResponse);
+    // The transcript comes from the PAGE, not a native host. YouTube blocks transcript
+    // fetching by ASN, so this could never run in the Worker — but it never needed the
+    // laptop's Python host either: the content script is the real YouTube web client, with
+    // the session and residential IP that make the request legitimate. If the caller already
+    // scraped it (the common case — youtube-content.js extracts before messaging), use that.
+    const transcript = request.transcript || await requestTranscriptFromTab(tab, videoId);
+    if (!transcript || !transcript.trim()) throw new Error('Empty transcript');
     // Replaces the placeholder job for this URL with the real one (same key), now with source.
     startSummary({ url, title, sourceText: transcript, isTranscript: true, videoId, tab, modelId: model.id, prompt });
   } catch (error) {
@@ -515,62 +569,61 @@ async function getVideoTranscriptAndSummarize(request, tab) {
       action: 'summaryError',
       url: nurl,
       modelId: model.id,
-      error: `Failed to get video transcript. Error: ${error.message}\n\nMake sure:\n1. Native host is installed\n2. Extension ID matches\n3. Python script has correct permissions`
+      error: `Couldn't read this video's transcript: ${error.message}`
     });
   }
 }
 
-// Open in Claude Code (via Superconductor / Ghostty fallback in the native host).
-async function openInClaudeCode(text, tab, title = '', videoId = '', channel = '', url = '') {
-  const port = chrome.runtime.connectNative('com.localai');
-  port.onMessage.addListener(async (response) => {
-    if (response.type === 'complete' && response.action === 'openInCC') {
-      await safeSend(tab, { action: 'openInCCComplete', filepath: response.filepath });
-      port.disconnect();
-    } else if (response.type === 'error') {
-      await safeSend(tab, { action: 'openInCCError', error: response.error });
-      port.disconnect();
-    }
-  });
-  port.onDisconnect.addListener(() => {
-    if (chrome.runtime.lastError) console.error('Native messaging error:', chrome.runtime.lastError);
-  });
-  port.postMessage({ action: 'openInCC', text, title, video_id: videoId, channel, url });
-}
+/**
+ * Ask a tab's content script to open YouTube's transcript panel and scrape it.
+ * If the tab isn't the watch page for this video (the feed-tile case), open the video in a
+ * background tab, scrape, and close it. This is the least elegant part of the design and it
+ * is unavoidable: the transcript is lazy-loaded when YouTube's own player opens the panel and
+ * mints a proof-of-origin token, so you have to actually BE on the watch page. The upside is
+ * that the job then runs entirely in the cloud, so a feed-tile click means "queue this" and
+ * you read it on the dashboard.
+ */
+async function requestTranscriptFromTab(tab, videoId) {
+  const onWatchPage = tab?.url?.includes(`watch?v=${videoId}`);
+  if (onWatchPage && tab?.id) return scrapeFromTab(tab.id);
 
-/** Parse com.ytsummary response; throw if host returned a failure string. */
-function extractTranscriptText(nativeResponse) {
-  const text = nativeResponse?.text;
-  if (!text || typeof text !== 'string') {
-    throw new Error('No transcript received');
-  }
-  // Host prefixes all failures with "Error:" (also accept legacy "yt-dlp error:").
-  const trimmed = text.trim();
-  if (
-    trimmed.startsWith('Error:') ||
-    trimmed.startsWith('Error ') ||
-    trimmed.startsWith('yt-dlp error:') ||
-    /^No subtitles available/i.test(trimmed) ||
-    /^Could not extract transcript/i.test(trimmed)
-  ) {
-    throw new Error(trimmed);
-  }
-  if (trimmed.length < 20) {
-    throw new Error(`Transcript too short (${trimmed.length} chars) — video may lack captions`);
-  }
-  return text;
-}
-
-async function openVideoInClaudeCode(videoId, tab, title = '', channel = '', url = '') {
+  const bg = await chrome.tabs.create({ url: `https://www.youtube.com/watch?v=${videoId}`, active: false });
   try {
-    const nativeResponse = await chrome.runtime.sendNativeMessage('com.ytsummary', { video_id: videoId });
-    const transcript = extractTranscriptText(nativeResponse);
-    await openInClaudeCode(transcript, tab, title, videoId, channel, url);
-  } catch (error) {
-    console.error('Error fetching video transcript for CC:', error);
-    await safeSend(tab, { action: 'openInCCError', error: `Failed to get transcript: ${error.message}` });
+    await waitForTabReady(bg.id);
+    return await scrapeFromTab(bg.id);
+  } finally {
+    chrome.tabs.remove(bg.id).catch(() => {});
   }
 }
+
+async function scrapeFromTab(tabId) {
+  const r = await chrome.tabs.sendMessage(tabId, { action: 'extractTranscript' });
+  if (!r?.ok) {
+    throw new Error(r?.reason === 'no-captions'
+      ? 'This video has no captions'
+      : (r?.detail || 'transcript extraction failed'));
+  }
+  return r.text;
+}
+
+function waitForTabReady(tabId, timeoutMs = 20000) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => { chrome.tabs.onUpdated.removeListener(fn); reject(new Error('Timed out loading the video page')); }, timeoutMs);
+    const fn = (id, info) => {
+      if (id !== tabId || info.status !== 'complete') return;
+      clearTimeout(t);
+      chrome.tabs.onUpdated.removeListener(fn);
+      // The content script still has to register its listener after 'complete'.
+      setTimeout(resolve, 800);
+    };
+    chrome.tabs.onUpdated.addListener(fn);
+  });
+}
+
+// NOTE: openInClaudeCode / openVideoInClaudeCode / extractTranscriptText were deleted with the
+// native hosts. Claude Code was only ever the runtime that could reach fal to render the
+// explain-viz poster; the Worker now calls fal directly, so the 🖥️ button has no job left and
+// the two buttons collapse into one ✨.
 
 // Clean up summaries older than 30 days on startup.
 async function cleanupOldSummaries() {
@@ -656,45 +709,20 @@ function handleRequest(request, sender, sendResponse) {
     return true; // async
   }
 
-  if (request.action === 'openInCC') {
-    openInClaudeCode(request.text, tab, request.title || '', request.videoId || '', request.channel || '', request.url || '');
-    return true;
-  }
-
-  if (request.action === 'openVideoInCC') {
-    openVideoInClaudeCode(request.videoId, tab, request.title || '', request.channel || '', request.url || '');
-    return true;
-  }
-
-  // Which videos are already summarized / have a graphic (one-shot native call).
-  if (request.action === 'getSummaryStatus') {
-    chrome.runtime.sendNativeMessage('com.localai', { action: 'status' }, (resp) => {
-      sendResponse(resp && resp.type === 'status' ? resp : { summarized: [], graphics: {} });
-    });
-    return true; // async
-  }
-
-  // Fetch a generated poster as a data URL so the panel can show it inline. Pass the native
-  // response through unchanged so the panel sees `too_large` + `path` (for its open-in-Preview
-  // fallback), not just a bare error.
+  // Posters are plain HTTPS URLs off R2 now — no native call, no data-URL round trip, and no
+  // sips downscale (that existed only to squeeze a 4K image under the ~1MB native-message cap).
   if (request.action === 'getPoster') {
-    chrome.runtime.sendNativeMessage('com.localai', {
-      action: 'getGraphic',
-      video_id: request.videoId || '',
-      graphic_path: request.graphicPath || ''
-    }, (resp) => {
-      if (chrome.runtime.lastError || !resp) { sendResponse({ type: 'error', error: 'native_error' }); return; }
-      sendResponse(resp);
-    });
+    (async () => {
+      try {
+        const { base } = await workerCreds();
+        const nurl = normUrl(request.url || '');
+        const job = jobs[nurl] || await loadJob(nurl);
+        const key = request.key || job?.posterKey;
+        if (!key) { sendResponse({ type: 'none' }); return; }
+        sendResponse({ type: 'poster', url: `${base}/poster/${encodeURIComponent(key)}` });
+      } catch (e) { sendResponse({ type: 'error', error: String(e.message || e) }); }
+    })();
     return true; // async
-  }
-
-  // Open a previously-generated graphic in the OS viewer (Preview on macOS).
-  if (request.action === 'openGraphic') {
-    chrome.runtime.sendNativeMessage('com.localai', { action: 'openGraphic', graphic_path: request.graphicPath }, () => {
-      if (chrome.runtime.lastError) console.error('openGraphic native error:', chrome.runtime.lastError);
-    });
-    return false;
   }
 
   if (request.action === 'getConfig') {

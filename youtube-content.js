@@ -11,7 +11,7 @@ function ytExtensionAlive() {
 // Shares an element id with content-dual.js's banner, so only one ever appears on a YouTube page.
 function ytHandleDeadContext() {
   ytContextDead = true;
-  document.querySelectorAll('#yt-btn-container button, .yt-cc-tile-btn, .yt-sum-tile-btn').forEach(b => {
+  document.querySelectorAll('#yt-btn-container button, .yt-sum-tile-btn').forEach(b => {
     if (b.setLoading) b.setLoading(false);
   });
   if (document.getElementById('claude-stale-banner')) return;
@@ -114,21 +114,13 @@ function createSummaryButton() {
     return btn;
   }
 
+  // ONE button. The old 🖥️ "Open in Claude Code" existed only because /explain-viz (and so
+  // fal) could only be reached from a Claude Code session; the Worker calls fal directly now,
+  // so ✨ does summary AND poster and there is nothing for a second button to do.
   const summarizeBtn = makeButton('yt-summarize-btn', '✨', '#5C5CFF', '#4A4AD9');
-  const ccBtn = makeButton('yt-cc-btn', '🖥️', '#333', '#444');
-  const graphicBtn = makeButton('yt-graphic-btn', '🖼️', '#0f5132', '#0a3d27');
+  summarizeBtn.title = 'Summarize (cloud) — summary + poster';
 
-  summarizeBtn.title = 'Summarize';
-  ccBtn.title = 'Open in Claude Code';
-  graphicBtn.title = 'View saved graphic for this video';
-  graphicBtn.style.display = 'none';  // shown by updateWatchGraphicButton() if a graphic exists
-  graphicBtn.onclick = () => {
-    const videoId = new URLSearchParams(window.location.search).get('v');
-    const path = videoId && summaryStatus.graphics.get(videoId);
-    if (path) ytSend({ action: 'openGraphic', graphicPath: path });
-  };
-
-  summarizeBtn.onclick = () => {
+  summarizeBtn.onclick = async () => {
     const videoId = new URLSearchParams(window.location.search).get('v');
     if (!videoId) return;
     summarizeBtn.setLoading(true);
@@ -137,51 +129,50 @@ function createSummaryButton() {
     const title =
       document.querySelector('h1.ytd-watch-metadata yt-formatted-string, #title h1, ytd-watch-metadata h1')?.textContent?.trim() ||
       document.title.replace(/^\(\d+\)\s+/, '').replace(/ - YouTube$/, '');
-    ytSend({ action: 'summarizeVideo', videoId, title, url: window.location.href });
-  };
 
-  ccBtn.onclick = () => {
-    const videoId = new URLSearchParams(window.location.search).get('v');
-    if (!videoId) return;
-    ccBtn.setLoading(true);
-    const title = document.title.replace(/^\(\d+\)\s+/, '').replace(/ - YouTube$/, '');
-    const channel =
-      document.querySelector('ytd-channel-name#channel-name a')?.textContent?.trim() ||
-      document.querySelector('#owner #channel-name a')?.textContent?.trim() ||
-      document.querySelector('span[itemprop="author"] [itemprop="name"]')?.getAttribute('content') ||
-      '';
-    ytSend({ action: 'openVideoInCC', videoId, title, channel, url: window.location.href });
+    // Scrape here, in the page, then hand the text to the background. The transcript can never
+    // be fetched by the Worker (YouTube blocks the whole cloud ASN), but this content script is
+    // the genuine YouTube client, so it just reads what the player already has.
+    let transcript = '';
+    try {
+      const r = await window.__ytTranscript.extractTranscript();
+      if (!r.ok) {
+        summarizeBtn.setLoading(false);
+        alert(r.reason === 'no-captions'
+          ? 'This video has no captions, so there is no transcript to summarize.'
+          : `Couldn't read the transcript: ${r.detail}`);
+        return;
+      }
+      transcript = r.text;
+    } catch (e) {
+      summarizeBtn.setLoading(false);
+      alert(`Transcript extraction failed: ${e.message}`);
+      return;
+    }
+
+    ytSend({ action: 'summarizeVideo', videoId, title, url: window.location.href, transcript });
   };
 
   container.appendChild(summarizeBtn);
-  container.appendChild(ccBtn);
-  container.appendChild(graphicBtn);
   player.appendChild(container);
-
-  // Reflect existing graphic status for this video (reveals the 🖼️ button if one exists).
-  refreshSummaryStatus(true);
 
   chrome.runtime.onMessage.addListener((request) => {
     // Clear spinner once streaming starts or fails — initSummary fires before any
     // tokens, so keep the spinner until the first real content/error event.
-    if (['updateSummary', 'updateFastSummary', 'updateDeepSummary', 'summaryComplete', 'summaryError', 'displaySummary'].includes(request.action)) {
+    if (['updateSummary', 'summaryComplete', 'summaryError', 'displaySummary'].includes(request.action)) {
       summarizeBtn.setLoading(false);
-    }
-    if (request.action === 'openInCCComplete' || request.action === 'openInCCError') {
-      ccBtn.setLoading(false);
     }
   });
 }
 
 // ---------------------------------------------------------------------------
 // Feed-tile action buttons
-// Hover-revealed ✨ (inline summarize) + 🖥️ (Open in Claude Code) on every
+// Hover-revealed ✨ (cloud summarize) on every
 // regular-video thumbnail in the feed / search results / watch-page sidebar.
-// Both reuse the existing message flows (summarizeVideo / openVideoInCC) —
+// Reuses the existing summarizeVideo flow —
 // no background.js or native-host changes needed.
 // ---------------------------------------------------------------------------
 
-let activeCCTileBtn = null;
 let activeSumTileBtn = null;
 
 // ---------------------------------------------------------------------------
@@ -224,7 +215,7 @@ function refreshSummaryStatus(force) {
     if (chrome.runtime.lastError || !resp) return;
     summaryStatus.summarized = new Set(resp.summarized || []);
     summaryStatus.graphics = new Map(Object.entries(resp.graphics || {}));
-    document.querySelectorAll('.yt-cc-tile-btn, .yt-sum-tile-btn').forEach(applyStatusToTileBtn);
+    document.querySelectorAll('.yt-sum-tile-btn').forEach(applyStatusToTileBtn);
     updateWatchGraphicButton();
   });
   if (!sent) statusInFlight = false;
@@ -289,8 +280,8 @@ function makeTileSumButton() {
   btn._persistent = false;
   btn._state = 'default';
   btn.innerHTML = btn._emoji;
-  // Sits to the left of the 🖥️ tile button (8 + 32 + 6 gap), measured from the right edge.
-  btn.style.cssText = tileBtnBaseStyle(46) + `background: ${btn._baseBg};`;
+  // Now the only tile button, so it takes the corner slot the 🖥️ button used to hold.
+  btn.style.cssText = tileBtnBaseStyle(8) + `background: ${btn._baseBg};`;
   wireTileBtnChrome(btn);
   // summarized/graphic tiles: stay visible without hover so you can re-open.
   btn.applyState = (state) => {
@@ -301,41 +292,6 @@ function makeTileSumButton() {
     } else {
       btn._emoji = btn._defaultEmoji; btn._baseBg = 'rgba(92,92,255,0.92)';
       btn.title = 'Summarize inline'; btn._persistent = false;
-    }
-    if (!btn.disabled) btn.innerHTML = btn._emoji;
-    btn.style.background = btn._baseBg;
-    setTileBtnShown(btn, btn._persistent || tileIsHovered(btn));
-  };
-  return btn;
-}
-
-function makeTileCCButton() {
-  const btn = document.createElement('button');
-  btn.className = 'yt-cc-tile-btn';
-  btn.title = 'Open in Claude Code';
-  btn._defaultEmoji = '🖥️';
-  btn._emoji = btn._defaultEmoji;
-  btn._baseBg = 'rgba(0,0,0,0.75)';
-  btn._persistent = false;   // summarized/graphic tiles stay visible without hovering
-  btn._state = 'default';
-  btn.innerHTML = btn._emoji;
-  // Outermost button, hard against the thumbnail's bottom-right corner.
-  btn.style.cssText = tileBtnBaseStyle(8) + `background: ${btn._baseBg};`;
-  wireTileBtnChrome(btn);
-  // Three states: default (hover-only 🖥️, opens in CC), summarized (persistent ✅,
-  // opens in CC), graphic (persistent 🖼️, green — click opens the saved graphic).
-  btn.applyState = (state, graphicPath) => {
-    btn._state = state;
-    btn._graphicPath = graphicPath || '';
-    if (state === 'graphic') {
-      btn._emoji = '🖼️'; btn._baseBg = 'rgba(16,81,50,0.92)';
-      btn.title = 'Open saved graphic'; btn._persistent = true;
-    } else if (state === 'summarized') {
-      btn._emoji = '✅'; btn._baseBg = 'rgba(16,81,50,0.82)';
-      btn.title = 'Already summarized — open in Claude Code'; btn._persistent = true;
-    } else {
-      btn._emoji = btn._defaultEmoji; btn._baseBg = 'rgba(0,0,0,0.75)';
-      btn.title = 'Open in Claude Code'; btn._persistent = false;
     }
     if (!btn.disabled) btn.innerHTML = btn._emoji;
     btn.style.background = btn._baseBg;
@@ -398,37 +354,6 @@ function injectTileButtons() {
       container.appendChild(sumBtn);
       applyStatusToTileBtn(sumBtn);
     }
-
-    if (!container.querySelector(':scope > .yt-cc-tile-btn')) {
-      const btn = makeTileCCButton();
-      btn._anchor = anchor;  // re-resolve videoId from here on each status refresh
-      btn.addEventListener('click', (e) => {
-        // Stop the click from triggering YouTube's SPA navigation on the anchor.
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-
-        const videoId = videoIdOf(anchor);
-        if (!videoId) return;
-
-        // Already has a graphic → open it immediately instead of re-summarizing.
-        if (summaryStatus.graphics.has(videoId)) {
-          ytSend({ action: 'openGraphic', graphicPath: summaryStatus.graphics.get(videoId) });
-          showCCToast('🖼️ Opening graphic', false);
-          return;
-        }
-
-        const { title, channel } = tileMeta(anchor);
-        const url = `https://www.youtube.com/watch?v=${videoId}`;
-
-        activeCCTileBtn = btn;
-        btn.setLoading(true);
-        ytSend({ action: 'openVideoInCC', videoId, title, channel, url });
-      });
-
-      container.appendChild(btn);
-      applyStatusToTileBtn(btn);  // mark immediately from cached status
-    }
   });
 }
 
@@ -470,23 +395,21 @@ function showCCToast(message, isError) {
   }, 2500);
 }
 
-// Completion/error feedback for tile-initiated actions.
-// Guarded by active*TileBtn so the watch-page fixed buttons' flows stay untouched.
-chrome.runtime.onMessage.addListener((request) => {
-  if (request.action === 'openInCCComplete' && activeCCTileBtn) {
-    const btn = activeCCTileBtn;
-    activeCCTileBtn = null;
-    btn.disabled = false;
-    btn.innerHTML = '✅';
-    setTimeout(() => { if (!btn.disabled) btn.innerHTML = btn._emoji; }, 2000);
-    showCCToast('✅ Opened in Claude Code', false);
-    refreshSummaryStatus(true);  // transcript now exists → tile flips to summarized
-  } else if (request.action === 'openInCCError' && activeCCTileBtn) {
-    activeCCTileBtn.setLoading(false);
-    activeCCTileBtn = null;
-    showCCToast('⚠️ ' + (request.error || 'Failed to open in Claude Code'), true);
+// The background asks the page to scrape YouTube's transcript panel. This is the only place
+// the transcript can legitimately be read — see yt-transcript.js for why.
+chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
+  if (request.action === 'extractTranscript') {
+    window.__ytTranscript
+      .extractTranscript()
+      .then(sendResponse)
+      .catch((e) => sendResponse({ ok: false, reason: 'threw', detail: String(e.message || e) }));
+    return true; // async
   }
+});
 
+// Completion/error feedback for tile-initiated actions.
+// Guarded by activeSumTileBtn so the watch-page button's flow stays untouched.
+chrome.runtime.onMessage.addListener((request) => {
   // Inline summarize from a tile: clear spinner on first token / complete / error.
   // summaryComplete flips the tile into the persistent "summarized" state via status.
   if (activeSumTileBtn &&
