@@ -195,15 +195,25 @@ export default {
 
       // --- history ---
       if (p === '/api/summaries' && req.method === 'GET') {
+        // ONE row per summary. A plain LEFT JOIN against generations fans out — a page
+        // summarized with two models (or a live run plus a backfilled import of the same
+        // video) returned one rail entry per generation and looked like duplicates. Pick a
+        // single preferred generation per summary: a real run beats an import, then newest.
         const rows = await env.DB.prepare(
           `SELECT s.id, s.url, s.title, s.kind, s.video_id, s.created_at, s.updated_at,
                   g.model_id, g.model_name, g.model_icon, g.state AS gen_state, g.duration_ms,
                   substr(g.content, 1, 240) AS excerpt, length(g.content) AS content_len,
                   p.state AS poster_state, p.r2_key AS poster_key
            FROM summaries s
-           LEFT JOIN generations g ON g.summary_id = s.id
+           LEFT JOIN (
+             SELECT *, ROW_NUMBER() OVER (
+               PARTITION BY summary_id
+               ORDER BY (model_id = 'imported') ASC, updated_at DESC
+             ) AS rn
+             FROM generations
+           ) g ON g.summary_id = s.id AND g.rn = 1
            LEFT JOIN posters p ON p.summary_id = s.id
-           ORDER BY s.updated_at DESC LIMIT 200`,
+           ORDER BY s.updated_at DESC LIMIT 1000`,
         ).all();
         return json({ summaries: rows.results ?? [] }, {}, origin);
       }
