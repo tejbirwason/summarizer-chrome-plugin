@@ -20,7 +20,9 @@ import time
 from pathlib import Path
 
 from dotenv import load_dotenv
-from litellm import completion
+
+# litellm is imported lazily inside handle_request (it's a ~1s import). The status /
+# openGraphic / health actions don't need it, so the native host spawns fast for them.
 
 # Load environment variables
 load_dotenv()
@@ -64,32 +66,57 @@ def send_message(msg):
     sys.stdout.buffer.write(encoded)
     sys.stdout.buffer.flush()
 
+def build_params(model_config, messages):
+    """Translate an ai-config.json model entry into LiteLLM completion kwargs.
+
+    OpenRouter exposes ONE unified `reasoning` field that it maps onto whatever the upstream
+    provider wants (OpenAI effort levels, Anthropic thinking budgets). We pass it straight
+    through as extra_body rather than using LiteLLM's reasoning_effort/thinking params, which
+    it rejects for several openrouter models ("openrouter does not support parameters: [...]").
+    Config may write `reasoning` as a bare effort string or as an explicit object:
+        "reasoning": "high"                  ->  {"effort": "high"}
+        "reasoning": {"effort": "high"}      ->  passed as-is
+        "reasoning": {"max_tokens": 10000}   ->  passed as-is (Anthropic-style budget)
+
+    Non-openrouter models keep the old provider-sniffing path, so a direct `openai/...` or
+    `anthropic/...` entry still works if one is ever added back.
+    """
+    litellm_model = model_config['litellm_model']
+    params = {
+        "model": litellm_model,
+        "messages": messages,
+        "stream": True,
+        "max_tokens": model_config.get('max_tokens', 4096),
+    }
+
+    reasoning = model_config.get('reasoning')
+    if litellm_model.startswith('openrouter/'):
+        if reasoning:
+            if isinstance(reasoning, str):
+                reasoning = {"effort": reasoning}
+            params['extra_body'] = {"reasoning": reasoning}
+    else:
+        if reasoning and 'openai' in litellm_model:
+            params['reasoning_effort'] = reasoning
+        if 'thinking' in model_config and 'anthropic' in litellm_model:
+            params['thinking'] = model_config['thinking']
+
+    return params
+
+
 def handle_request(data):
     """Handle summarize or followup request (stateless)"""
+    from litellm import completion  # lazy: heavy import, only needed for completions
     model_id = data['modelId']
     model_config = data['modelConfig']
     messages = data['messages']  # Full conversation history from extension
 
     log_message(f"Request for model {model_id}: {model_config['litellm_model']}, messages count: {len(messages)}")
 
-    # Build completion params
-    params = {
-        "model": model_config['litellm_model'],
-        "messages": messages,
-        "stream": True,
-        "max_tokens": model_config.get('max_tokens', 4096)
-    }
+    params = build_params(model_config, messages)
 
-    # Add reasoning for OpenAI models that support it
-    if 'reasoning' in model_config and 'openai' in model_config['litellm_model']:
-        params['reasoning_effort'] = model_config['reasoning']
-
-    # Add extended thinking for Anthropic models
-    if 'thinking' in model_config and 'anthropic' in model_config['litellm_model']:
-        params['thinking'] = model_config['thinking']
-
-    thinking_info = f", thinking={params.get('thinking')}" if 'thinking' in params else ""
-    log_message(f"LiteLLM params: model={params['model']}, max_tokens={params['max_tokens']}{thinking_info}")
+    extra = params.get('extra_body') or {k: params[k] for k in ('reasoning_effort', 'thinking') if k in params}
+    log_message(f"LiteLLM params: model={params['model']}, max_tokens={params['max_tokens']}, extra={extra}")
 
     start_time = time.time()
     full_response = ""
@@ -148,16 +175,25 @@ def open_in_cc_config():
     (or an unreadable/invalid file) fall back to OPEN_IN_CC_DEFAULTS."""
     cfg = dict(OPEN_IN_CC_DEFAULTS)
     try:
-        cfg.update(json.loads(CONFIG_PATH.read_text()).get("openInClaudeCode", {}))
+        block = json.loads(CONFIG_PATH.read_text()).get("openInClaudeCode", {})
     except (OSError, json.JSONDecodeError) as e:
         log_message(f"Could not load openInClaudeCode config ({e}); using defaults")
+        return cfg
+    # Only non-empty overrides win. A null/"" model must not shadow the default, or we'd hand
+    # the launchers an empty --model and silently get whatever their default model is.
+    for key, value in block.items():
+        if value:
+            cfg[key] = value
+        elif key in OPEN_IN_CC_DEFAULTS:
+            log_message(f"openInClaudeCode.{key} is empty; keeping default {cfg[key]!r}")
     return cfg
 
 
-def summarize_prompt(template, ref):
-    """Fill the configured transcript-summarization instruction with the transcript path.
-    Uses .replace (not .format) so other braces in a user-edited prompt are left alone."""
-    return template.replace("{ref}", ref)
+def summarize_prompt(template, ref, out=""):
+    """Fill the configured transcript-summarization instruction with the transcript path
+    ({ref}) and the deterministic graphic output path ({out}). Uses .replace (not .format)
+    so other braces in a user-edited prompt are left alone."""
+    return template.replace("{ref}", ref).replace("{out}", out)
 
 def handle_open_in_cc(data):
     """Archive the transcript to TRANSCRIPTS_DIR (named by video title) and open a fresh
@@ -186,8 +222,13 @@ def handle_open_in_cc(data):
 
     cfg = open_in_cc_config()
     model, reasoning, system_prompt = cfg["model"], cfg["reasoning"], cfg["systemPrompt"]
-    prompt_rel = summarize_prompt(cfg["prompt"], fname)            # relative — only the --worktree-bound chat fallback uses this
-    prompt_abs = summarize_prompt(cfg["prompt"], str(filepath))    # absolute — robust regardless of the tab's working dir
+    # Deterministic graphic path: a PNG sibling sharing the transcript's stem
+    # (…-<videoId>.png). This is the join key — handle_status() later finds it by the
+    # embedded videoId, so the extension can detect & open the graphic for a video.
+    out_abs = str(filepath.with_suffix(".png"))
+    out_rel = Path(fname).with_suffix(".png").name
+    prompt_rel = summarize_prompt(cfg["prompt"], fname, out_rel)          # relative — only the --worktree-bound chat fallback uses this
+    prompt_abs = summarize_prompt(cfg["prompt"], str(filepath), out_abs)  # absolute — robust regardless of the tab's working dir
 
     sc_ok = Path(SC_BIN).exists() and subprocess.run([SC_BIN, 'status'], capture_output=True).returncode == 0
 
@@ -197,8 +238,8 @@ def handle_open_in_cc(data):
     if sc_ok:
         run = subprocess.run(
             [SC_BIN, 'layout', 'run', 'tabs', '--provider', 'claude', '--ui', 'terminal',
-             '--model', model, '--reasoning', reasoning,
-             '--worktree', str(TRANSCRIPTS_DIR), '--active', 'keep',
+             '--model', model, '--reasoning', reasoning, '--system-prompt', system_prompt,
+             '--worktree', str(TRANSCRIPTS_DIR), '--open-if-needed', '--active', 'keep',
              '--label', (title or base)[:40], '--prompt', prompt_abs, '--output', 'json'],
             capture_output=True, text=True,
         )
@@ -239,8 +280,11 @@ def handle_open_in_cc(data):
         log_message("Superconductor unavailable (sc status failed) — falling back to Ghostty")
 
     # Fallback 2: launch the Claude CLI on the transcript in a Ghostty window.
+    # --model/--effort are mandatory here: with no --model the CLI picks its own default, which
+    # is not pinned anywhere on this machine and can be Fable rather than Opus.
     cc_cmd = (
         f'{CLAUDE_BIN} --dangerously-skip-permissions '
+        f'--model {shlex.quote(model)} --effort {shlex.quote(reasoning)} '
         f'--append-system-prompt {shlex.quote(system_prompt)} {shlex.quote(prompt_abs)}'
     )
     subprocess.Popen(
@@ -252,6 +296,121 @@ def handle_open_in_cc(data):
     )
     log_message(f"Launched Ghostty fallback for {filepath}")
     send_message({"type": "complete", "action": "openInCC", "filepath": str(filepath)})
+
+# ---------------------------------------------------------------------------
+# Summary status — associate a YouTube video with its archived transcript and
+# generated explainer graphic via the 11-char videoId embedded in each filename
+# (…-<videoId>.md / …-<videoId>.png). The filesystem IS the index: a transcript
+# means "summarized", a sibling PNG means "graphic ready". No separate store to
+# keep in sync — the graphic appearing on disk is itself the completion signal.
+# ---------------------------------------------------------------------------
+VIDEO_ID_RE = re.compile(r'-([A-Za-z0-9_-]{11})\.(?:md|png)$')
+
+def scan_status():
+    """Scan TRANSCRIPTS_DIR once. Return (sorted summarized videoIds, {videoId: graphic_path})."""
+    summarized, graphics = set(), {}
+    if TRANSCRIPTS_DIR.exists():
+        for p in TRANSCRIPTS_DIR.iterdir():
+            m = VIDEO_ID_RE.search(p.name)
+            if not m:
+                continue
+            vid = m.group(1)
+            if p.suffix == ".png":
+                graphics[vid] = str(p)
+            else:  # .md transcript
+                summarized.add(vid)
+    summarized.update(graphics)  # a graphic implies the video was summarized
+    return sorted(summarized), graphics
+
+def handle_status(data):
+    """Return the set of summarized videoIds and the videoId->graphic-path map."""
+    summarized, graphics = scan_status()
+    log_message(f"status: {len(summarized)} summarized, {len(graphics)} with graphics")
+    send_message({"type": "status", "summarized": summarized, "graphics": graphics})
+
+def handle_open_graphic(data):
+    """Open a generated graphic in the macOS default viewer (Preview)."""
+    path = data.get("graphic_path", "")
+    if path and Path(path).exists():
+        subprocess.Popen(["open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        log_message(f"Opened graphic {path}")
+        send_message({"type": "complete", "action": "openGraphic", "path": path})
+    else:
+        log_message(f"openGraphic: not found: {path}")
+        send_message({"type": "error", "action": "openGraphic", "error": "Graphic not found"})
+
+# Cap the inline poster payload. Native-messaging responses are hard-capped at 1 MB by Chrome,
+# and base64 inflates bytes ~1.33x, so the encoded preview must stay well under that. explain-viz
+# posters are 4K (11–14 MB), so we never ship the original — we downscale to a preview JPEG with
+# the built-in `sips` (no extra Python deps) and hand back the ORIGINAL path so a click still
+# opens the full-res image in Preview.
+MAX_INLINE_GRAPHIC_BYTES = 700_000
+
+def make_preview_data_url(src):
+    """Downscale `src` to a JPEG preview small enough to inline, using macOS `sips`. Tries a few
+    max-dimensions and returns (data_url, None) on success or (None, reason) on failure."""
+    import base64
+    import tempfile
+    for max_dim in (1200, 900, 700):
+        tmp = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
+        tmp.close()
+        try:
+            r = subprocess.run(
+                ["sips", "-Z", str(max_dim), "--setProperty", "format", "jpeg", str(src), "--out", tmp.name],
+                capture_output=True,
+            )
+            if r.returncode != 0 or not os.path.exists(tmp.name):
+                continue
+            size = os.path.getsize(tmp.name)
+            if size == 0 or size > MAX_INLINE_GRAPHIC_BYTES:
+                continue
+            with open(tmp.name, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("ascii")
+            return f"data:image/jpeg;base64,{b64}", None
+        finally:
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
+    return None, "preview_failed"
+
+def handle_get_graphic(data):
+    """Return a generated poster as an inline JPEG-preview data: URL (downscaled from the 4K
+    original). Resolve the file from an explicit graphic_path, else from the videoId (same
+    filename join key handle_status uses). The returned `path` is always the ORIGINAL, so the
+    panel's click-to-open still shows full resolution in Preview."""
+    import base64
+    path = data.get("graphic_path", "")
+    if not path:
+        vid = data.get("video_id", "")
+        if vid:
+            _, graphics = scan_status()
+            path = graphics.get(vid, "")
+    p = Path(path) if path else None
+    if not p or not p.exists():
+        log_message(f"getGraphic: not found (path={path!r}, video_id={data.get('video_id','')!r})")
+        send_message({"type": "error", "action": "getGraphic", "error": "not_found"})
+        return
+
+    size = p.stat().st_size
+    ext = p.suffix.lstrip(".").lower() or "png"
+
+    # Small enough already → inline the original bytes directly.
+    if size <= MAX_INLINE_GRAPHIC_BYTES and ext in ("jpg", "jpeg", "png", "webp", "gif"):
+        mime = "image/jpeg" if ext in ("jpg", "jpeg") else f"image/{ext}"
+        b64 = base64.b64encode(p.read_bytes()).decode("ascii")
+        log_message(f"getGraphic: inlined {p.name} as-is ({size} bytes)")
+        send_message({"type": "graphic", "action": "getGraphic", "path": str(p), "dataUrl": f"data:{mime};base64,{b64}"})
+        return
+
+    # Large → downscale to a preview.
+    data_url, reason = make_preview_data_url(p)
+    if data_url:
+        log_message(f"getGraphic: sent downscaled preview of {p.name} (orig {size} bytes)")
+        send_message({"type": "graphic", "action": "getGraphic", "path": str(p), "preview": True, "dataUrl": data_url})
+    else:
+        log_message(f"getGraphic: {p.name} too large and preview failed ({reason})")
+        send_message({"type": "error", "action": "getGraphic", "error": "too_large", "path": str(p)})
 
 def main():
     """Main loop for native messaging"""
@@ -271,6 +430,12 @@ def main():
                 handle_request(msg)
             elif action == 'openInCC':
                 handle_open_in_cc(msg)
+            elif action == 'status':
+                handle_status(msg)
+            elif action == 'openGraphic':
+                handle_open_graphic(msg)
+            elif action == 'getGraphic':
+                handle_get_graphic(msg)
             elif action == 'health':
                 send_message({"status": "healthy", "service": "Local AI Handler (LiteLLM)"})
             else:

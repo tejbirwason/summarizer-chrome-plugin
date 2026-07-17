@@ -1,12 +1,15 @@
 {
   "manifest_version": 3,
-  "name": "AI Summary & Draft",
-  "version": "1.0",
-  "description": "Two floating emoji buttons: Summarize with o3 & Draft responses with Claude",
-  "permissions": ["activeTab", "scripting", "storage", "nativeMessaging"],
-  "host_permissions": ["https://api.anthropic.com/*", "https://api.openai.com/*", "http://135.181.106.49/*", "<all_urls>"],
+  "name": "AI Summary",
+  "version": "1.1",
+  "description": "Summarize any page or YouTube video with your choice of AI model — streaming, saved, and searchable.",
+  "permissions": ["activeTab", "scripting", "storage", "unlimitedStorage", "nativeMessaging"],
+  "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "AI Summary — open panel / history"
   },
   "content_scripts": [
     {

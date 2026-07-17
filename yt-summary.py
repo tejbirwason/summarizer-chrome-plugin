@@ -79,7 +79,7 @@ while True:
                             text_data = list(auto_captions.values())[0]
 
                     if not text_data:
-                        return "No subtitles available for this video"
+                        return "Error: No subtitles available for this video"
 
                     # Find the json3 format (contains text data)
                     json3_url = None
@@ -118,19 +118,23 @@ while True:
                                     if 'utf8' in seg:
                                         texts.append(seg['utf8'])
 
+                        joined = ' '.join(texts).strip()
+                        if not joined:
+                            return "Error: Subtitle track was empty"
+
                         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         with open("/tmp/native-host-test.txt", "a") as f:
                             f.write(f"[{timestamp}] Tier 3: SUCCESS (yt-dlp)\n")
 
-                        return ' '.join(texts)
+                        return joined
 
-                    return "Could not extract transcript text"
+                    return "Error: Could not extract transcript text"
 
             except Exception as e:
                 timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 with open("/tmp/native-host-test.txt", "a") as f:
                     f.write(f"[{timestamp}] Tier 3: Failed - {str(e)[:100]}\n")
-                return f"yt-dlp error: {str(e)}"
+                return f"Error: yt-dlp failed: {str(e)}"
 
         def get_transcript_api_no_proxy(video_id):
             """Try getting transcript without proxy (fastest, free)"""
