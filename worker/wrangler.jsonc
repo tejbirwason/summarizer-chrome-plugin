@@ -1,0 +1,29 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "summarizer",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "account_id": "70f16665c7d3d224611414d8fb2a336b",
+  "observability": { "enabled": true },
+  "assets": { "directory": "./public", "binding": "ASSETS" },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "summarizer",
+      "database_id": "119cf4cb-6057-4c47-a8ce-0ab03314b855",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [{ "binding": "POSTERS", "bucket_name": "summarizer-posters" }],
+  // One SummaryJob per normalized URL. This is the port of background.js's job store:
+  // the DO owns the job and stays alive while the OpenRouter fetch is in flight, which is
+  // what preserves "keeps generating after you close the tab". ctx.waitUntil() would only
+  // buy 30s past disconnect — nowhere near a long reasoning generation.
+  "durable_objects": {
+    "bindings": [{ "name": "JOB", "class_name": "SummaryJob" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SummaryJob"] }],
+  // Waiting on OpenRouter is I/O, not CPU, so this ceiling is only for markdown/JSON work.
+  "limits": { "cpu_ms": 300000 }
+}

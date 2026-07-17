@@ -72,3 +72,7 @@ test-results/
 
 # Research / working notes (not extension source)
 research/
+
+# Worker
+worker/node_modules/
+worker/.wrangler/
