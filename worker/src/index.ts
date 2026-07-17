@@ -142,6 +142,57 @@ export default {
         }
       }
 
+      // --- backfill import ---
+      // Writes D1 directly, deliberately bypassing the Durable Object: these transcripts
+      // already HAVE summaries and posters, so routing them through the job path would
+      // re-run the LLM and re-render fal for content that already exists. Idempotent by
+      // summary id, so re-running the backfill is safe.
+      if (p === '/api/import' && req.method === 'POST') {
+        const b = (await req.json()) as {
+          url: string; title?: string; channel?: string; videoId?: string;
+          transcript: string; summary?: string; createdAt?: number;
+          posterKey?: string; modelName?: string; modelIcon?: string;
+        };
+        if (!b.url || !b.transcript) return json({ error: 'url and transcript required' }, { status: 400 }, origin);
+        const id = normUrl(b.url);
+        const ts = b.createdAt ?? Date.now();
+
+        await env.DB.prepare(
+          `INSERT INTO summaries (id, url, title, kind, video_id, transcript, created_at, updated_at)
+           VALUES (?, ?, ?, 'video', ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET title=excluded.title, transcript=excluded.transcript, updated_at=excluded.updated_at`,
+        ).bind(id, b.url, b.title ?? b.url, b.videoId ?? null, b.transcript, ts, ts).run();
+
+        if (b.summary?.trim()) {
+          await env.DB.prepare(
+            `INSERT INTO generations (id, summary_id, model_id, model_name, model_icon, prompt, content, state, created_at, updated_at)
+             VALUES (?, ?, 'imported', ?, ?, '', ?, 'complete', ?, ?)
+             ON CONFLICT(summary_id, model_id) DO UPDATE SET content=excluded.content, updated_at=excluded.updated_at`,
+          ).bind(`${id}::imported`, id, b.modelName ?? 'Imported', b.modelIcon ?? '📦', b.summary, ts, ts).run();
+        }
+
+        if (b.posterKey) {
+          await env.DB.prepare(
+            `INSERT INTO posters (id, summary_id, r2_key, state, created_at, updated_at)
+             VALUES (?, ?, ?, 'complete', ?, ?)
+             ON CONFLICT(id) DO UPDATE SET r2_key=excluded.r2_key, state='complete', updated_at=excluded.updated_at`,
+          ).bind(id, id, b.posterKey, ts, ts).run();
+        }
+        return json({ ok: true, id }, {}, origin);
+      }
+
+      // Full record for the reading view: whole summary text, not the list excerpt.
+      if (p.startsWith('/api/summary/') && req.method === 'GET') {
+        const id = decodeURIComponent(p.slice('/api/summary/'.length));
+        const s = await env.DB.prepare('SELECT * FROM summaries WHERE id = ?').bind(id).first();
+        if (!s) return json({ error: 'not found' }, { status: 404 }, origin);
+        const gens = await env.DB.prepare(
+          'SELECT model_id, model_name, model_icon, content, state, duration_ms FROM generations WHERE summary_id = ?',
+        ).bind(id).all();
+        const poster = await env.DB.prepare('SELECT r2_key, state FROM posters WHERE summary_id = ?').bind(id).first();
+        return json({ summary: s, generations: gens.results ?? [], poster: poster ?? null }, {}, origin);
+      }
+
       // --- history ---
       if (p === '/api/summaries' && req.method === 'GET') {
         const rows = await env.DB.prepare(
