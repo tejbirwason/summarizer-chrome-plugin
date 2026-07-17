@@ -60,9 +60,26 @@
   .doc blockquote { border-left: 2px solid var(--teal); margin: 0 0 14px; padding: 2px 0 2px 14px;
     color: var(--ink-dim); }
   .doc hr { border: none; border-top: 1px solid var(--line); margin: 26px 0; }
-  .doc table { border-collapse: collapse; width: 100%; margin-bottom: 16px; font-size: 14px; }
-  .doc th, .doc td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; }
-  .table-wrap { overflow-x: auto; }
+  .doc table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  .doc th, .doc td { border: 1px solid var(--line); padding: 7px 11px; text-align: left;
+    vertical-align: top; }
+  .doc thead th { background: var(--panel-2); color: var(--ink); font-weight: 620;
+    font-size: 12px; letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
+  .doc tbody tr:nth-child(even) { background: rgba(255,255,255,.017); }
+  .doc tbody td { color: #ded6cd; }
+  /* Wide tables scroll inside their own box — the page body must never scroll sideways. */
+  .table-wrap { overflow-x: auto; margin: 0 0 18px; border-radius: 8px;
+    border: 1px solid var(--line); }
+  .table-wrap table { border: none; }
+  .table-wrap th:first-child, .table-wrap td:first-child { border-left: none; }
+  .table-wrap th:last-child, .table-wrap td:last-child { border-right: none; }
+  .table-wrap thead th { border-top: none; }
+  .table-wrap tbody tr:last-child td { border-bottom: none; }
+
+  /* 16:9 embed of the source video */
+  .video { position: relative; width: 100%; aspect-ratio: 16 / 9; margin: 18px 0 26px;
+    border-radius: 10px; overflow: hidden; border: 1px solid var(--line); background: #000; }
+  .video iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
 
   .placeholder { color: var(--ink-faint); text-align: center; padding-top: 34vh; }
   .placeholder h2 { font-size: 15px; color: var(--ink-dim); margin: 0 0 6px; }
@@ -180,7 +197,8 @@ async function api(path, opts = {}) {
  */
 function md(src) {
   const lines = esc(src).split('\n');
-  let out = '', inList = false, listTag = 'ul', inCode = false;
+  let out = '', inList = false, listTag = 'ul', inCode = false, i = 0;
+
   const inline = (t) => t
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
@@ -188,11 +206,49 @@ function md(src) {
     .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
   const closeList = () => { if (inList) { out += `</${listTag}>`; inList = false; } };
 
-  for (const raw of lines) {
-    const line = raw.replace(/\s+$/, '');
+  // A pipe row is only a table if the NEXT line is a |---|---| separator — which is exactly
+  // why the old line-at-a-time loop couldn't do this and fell back to printing the pipes.
+  const isRow = (l) => l !== undefined && /\|/.test(l) && /^\s*\|?[^|]*\|/.test(l.trim());
+  const isSep = (l) => l !== undefined && /-/.test(l) && /\|/.test(l) && /^[\s|:-]+$/.test(l.trim());
+  const cells = (l) => {
+    let t = l.trim();
+    if (t.startsWith('|')) t = t.slice(1);
+    if (t.endsWith('|')) t = t.slice(0, -1);
+    return t.split('|').map((c) => c.trim());
+  };
+  const alignOf = (sepCell) => {
+    const s = sepCell.trim();
+    if (s.startsWith(':') && s.endsWith(':')) return ' style="text-align:center"';
+    if (s.endsWith(':')) return ' style="text-align:right"';
+    return '';
+  };
+
+  for (; i < lines.length; i++) {
+    const line = lines[i].replace(/\s+$/, '');
+
     if (/^```/.test(line)) { closeList(); inCode = !inCode; out += inCode ? '<pre><code>' : '</code></pre>'; continue; }
     if (inCode) { out += line + '\n'; continue; }
     if (!line.trim()) { closeList(); continue; }
+
+    // --- table ---
+    if (isRow(line) && isSep(lines[i + 1])) {
+      closeList();
+      const head = cells(line);
+      const aligns = cells(lines[i + 1]).map(alignOf);
+      let body = '';
+      let j = i + 2;
+      for (; j < lines.length && isRow(lines[j]) && lines[j].trim(); j++) {
+        const row = cells(lines[j]);
+        body += '<tr>' + head.map((_, c) =>
+          `<td${aligns[c] ?? ''}>${inline(row[c] ?? '')}</td>`).join('') + '</tr>';
+      }
+      out += '<div class="table-wrap"><table><thead><tr>' +
+        head.map((h, c) => `<th${aligns[c] ?? ''}>${inline(h)}</th>`).join('') +
+        `</tr></thead><tbody>${body}</tbody></table></div>`;
+      i = j - 1;
+      continue;
+    }
+
     let m;
     if ((m = /^(#{1,6})\s+(.*)$/.exec(line))) { closeList(); const h = Math.min(m[1].length + 1, 4); out += `<h${h}>${inline(m[2])}</h${h}>`; continue; }
     if (/^(---|\*\*\*)$/.test(line.trim())) { closeList(); out += '<hr />'; continue; }
@@ -205,7 +261,6 @@ function md(src) {
       if (!inList || listTag !== 'ol') { closeList(); out += '<ol>'; inList = true; listTag = 'ol'; }
       out += `<li>${inline(m[1])}</li>`; continue;
     }
-    if (/^\|.*\|$/.test(line.trim())) { closeList(); out += `<p>${inline(line)}</p>`; continue; }
     closeList();
     out += `<p>${inline(line)}</p>`;
   }
@@ -254,6 +309,10 @@ async function open(id) {
   const gen = generations.find((g) => g.model_id !== 'imported') || generations[0];
   const key = poster?.r2_key;
 
+  // Only real YouTube captures embed. The rescued local:// rows have no video id, and
+  // youtube-nocookie keeps the reader from seeding tracking cookies just by being open.
+  const vid = /^[A-Za-z0-9_-]{11}$/.test(summary.video_id || '') ? summary.video_id : null;
+
   $('#reader-inner').innerHTML = `
     ${key ? `<img class="hero" id="hero" src="/poster/${encodeURIComponent(key)}" alt="" />
              <p class="hero-cap">Click to view full resolution</p>` : ''}
@@ -265,6 +324,10 @@ async function open(id) {
       <span>· <a href="${esc(summary.url)}" target="_blank" rel="noreferrer">watch ↗</a></span>
       ${summary.transcript ? `<span>· ${(summary.transcript.length / 1000).toFixed(0)}k transcript</span>` : ''}
     </div>
+    ${vid ? `<div class="video"><iframe src="https://www.youtube-nocookie.com/embed/${vid}"
+        title="${esc(summary.title || '')}" loading="lazy" allowfullscreen
+        allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+        referrerpolicy="strict-origin-when-cross-origin"></iframe></div>` : ''}
     <div class="doc">${gen?.content
       ? md(gen.content)
       : '<p style="color:var(--ink-faint)">Transcript imported, but no summary was generated for this one yet.</p>'}</div>`;
