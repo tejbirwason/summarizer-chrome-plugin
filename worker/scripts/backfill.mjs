@@ -58,14 +58,17 @@ for (const f of files.slice(0, limit)) {
   const raw = readFileSync(join(DIR, f), 'utf8');
   const { meta, body } = parseFrontMatter(raw);
 
-  // The url in front matter is authoritative; fall back to the id parsed from the filename.
+  // The url in front matter is authoritative — EXCEPT that the "untitled" captures carry a
+  // truncated `url: https://youtube.com/watch?v=` with an empty v. normUrl strips the empty
+  // query, so all 14 of them normalize to the same id and upsert over each other: 13
+  // transcripts silently vanish. Give anything without a real video id a synthetic id keyed
+  // to its filename so each keeps its own row.
   const videoId = m?.[3] ?? null;
-  const url = meta.url || (videoId ? `https://www.youtube.com/watch?v=${videoId}` : null);
-  if (!url || !body.trim()) {
-    // No id and no url means nothing can key this row — the "untitled" captures fall here.
-    skipped++;
-    continue;
-  }
+  const metaUrl = /watch\?v=[A-Za-z0-9_-]{11}/.test(meta.url || '') ? meta.url : null;
+  const url =
+    metaUrl ||
+    (videoId ? `https://www.youtube.com/watch?v=${videoId}` : `local://yt-transcripts/${stem}`);
+  if (!body.trim()) { skipped++; continue; }
 
   let summary = '';
   try { summary = readFileSync(join(DIR, `${stem}.summary.md`), 'utf8').trim(); } catch {}
