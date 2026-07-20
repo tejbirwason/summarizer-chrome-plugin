@@ -523,7 +523,16 @@ async function handleListSummaries(sendResponse) {
 
 async function getVideoTranscriptAndSummarize(request, tab) {
   const videoId = request.videoId;
-  const url = request.url || tab?.url;
+  // Build the url FROM the videoId being summarized, not from request.url/tab.url. The tile
+  // path can't know the page url and the watch path's tab.url can lag on SPA nav, so trusting
+  // either let a summary get keyed to — and embed — whatever video the user was browsing FROM
+  // (observed: a marketing-agency summary embedding the Claude Code video the user was on).
+  // videoId is the one value every path derives from the actual thing being summarized (the
+  // transcript is scraped for it too), so canonicalizing off it keeps url, video_id and
+  // transcript mutually consistent by construction.
+  const url = videoId
+    ? `https://www.youtube.com/watch?v=${videoId}`
+    : (request.url || tab?.url);
   const nurl = normUrl(url);
   const model = findModel(request.modelId) || aiConfig.models[0];
   const prompt = request.prompt || model.prompt || aiConfig.defaultPrompt;

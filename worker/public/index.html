@@ -309,9 +309,13 @@ async function open(id) {
   const gen = generations.find((g) => g.model_id !== 'imported') || generations[0];
   const key = poster?.r2_key;
 
-  // Only real YouTube captures embed. The rescued local:// rows have no video id, and
-  // youtube-nocookie keeps the reader from seeding tracking cookies just by being open.
-  const vid = /^[A-Za-z0-9_-]{11}$/.test(summary.video_id || '') ? summary.video_id : null;
+  // Derive the embed id from the summary's OWN url, NOT the separate video_id column.
+  // video_id was observed getting polluted by the tab the user summarized FROM, so trusting
+  // it embedded the wrong video. The url is keyed to the summary itself; only embed when it
+  // actually carries a watch id. youtube-nocookie keeps the reader from seeding tracking
+  // cookies just by being open.
+  const vm = /[?&]v=([A-Za-z0-9_-]{11})/.exec(summary.url || summary.id || '');
+  const vid = vm ? vm[1] : null;
 
   $('#reader-inner').innerHTML = `
     ${key ? `<img class="hero" id="hero" src="/poster/${encodeURIComponent(key)}" alt="" />
