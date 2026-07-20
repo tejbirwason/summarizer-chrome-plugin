@@ -70,15 +70,34 @@
     let got = readSegments();
     if (got.rows.length) return ok(got);
 
-    // The button lives inside the collapsed description on many layouts.
-    document.querySelector('#expand')?.click();
-    await sleep(150);
+    // WHY THIS IS A POLL, NOT A SINGLE CHECK: users reach the watch page by SPA navigation
+    // (clicking a video from the feed), and the description / engagement section that holds
+    // the "Show transcript" button re-hydrates asynchronously AFTER the click. The old code
+    // clicked #expand, waited 150ms once, and if the button wasn't there yet declared "no
+    // captions" — so a captioned video failed purely because the button hadn't rendered.
+    // Poll for the button, forcing the metadata area to lazy-render, before believing it's
+    // absent. Only when it genuinely never appears is the video truly caption-less.
+    const btnDeadline = Date.now() + 9000;
+    let btn = null;
+    while (Date.now() < btnDeadline) {
+      // Nudge YouTube to render the below-the-fold description (lazy on SPA nav).
+      (document.querySelector('ytd-watch-metadata') || document.querySelector('#below'))
+        ?.scrollIntoView({ block: 'center' });
+      // The button lives inside the collapsed description on many layouts — expand it.
+      document.querySelector('tp-yt-paper-button#expand, #expand, #description-inline-expander #expand')?.click();
+      btn = findTranscriptButton();
+      if (btn) break;
+      await sleep(300);
+    }
 
-    const btn = findTranscriptButton();
     if (!btn) {
-      // No button at all is a real answer, not a failure: the video has no captions.
-      // No tier can fix this — yt-dlp couldn't invent them either.
-      return { ok: false, reason: 'no-captions', detail: 'No "Show transcript" control on this video' };
+      // A missing CC/subtitles control corroborates a genuine no-captions verdict; if CC IS
+      // present but the transcript button never rendered, say so honestly rather than
+      // claiming the video has no captions when it does.
+      const hasCC = !!document.querySelector('.ytp-subtitles-button[aria-pressed], .ytp-subtitles-button');
+      return hasCC
+        ? { ok: false, reason: 'panel-unavailable', detail: 'Captions exist but YouTube did not expose a transcript panel for this video' }
+        : { ok: false, reason: 'no-captions', detail: 'No "Show transcript" control on this video' };
     }
     btn.click();
 
