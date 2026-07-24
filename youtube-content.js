@@ -133,27 +133,11 @@ function createSummaryButton() {
       document.querySelector('h1.ytd-watch-metadata yt-formatted-string, #title h1, ytd-watch-metadata h1')?.textContent?.trim() ||
       document.title.replace(/^\(\d+\)\s+/, '').replace(/ - YouTube$/, '');
 
-    // Scrape here, in the page, then hand the text to the background. The transcript can never
-    // be fetched by the Worker (YouTube blocks the whole cloud ASN), but this content script is
-    // the genuine YouTube client, so it just reads what the player already has.
-    let transcript = '';
-    try {
-      const r = await window.__ytTranscript.extractTranscript();
-      if (!r.ok) {
-        btn.setLoading(false);
-        alert(r.reason === 'no-captions'
-          ? 'This video has no captions, so there is no transcript to summarize.'
-          : `Couldn't read the transcript: ${r.detail}`);
-        return;
-      }
-      transcript = r.text;
-    } catch (e) {
-      btn.setLoading(false);
-      alert(`Transcript extraction failed: ${e.message}`);
-      return;
-    }
-
-    ytSend({ action: 'summarizeVideo', videoId, title, url: window.location.href, transcript, noPoster });
+    // No pre-scraping here. The background fetches the transcript itself: native host
+    // (yt-summary.py, ~2s, touches nothing on this page) first, and only if that fails does it
+    // message back into this tab for the DOM-panel scrape (yt-transcript.js). Failures surface
+    // through the normal summaryError path in the panel, not an alert.
+    ytSend({ action: 'summarizeVideo', videoId, title, url: window.location.href, noPoster });
   };
 
   summarizeBtn.onclick = () => runVideoSummary(summarizeBtn, false);

@@ -3,7 +3,7 @@
   "name": "AI Summary",
   "version": "1.1",
   "description": "Summarize any page or YouTube video with your choice of AI model — streaming, saved, and searchable.",
-  "permissions": ["activeTab", "scripting", "storage", "unlimitedStorage"],
+  "permissions": ["activeTab", "scripting", "storage", "unlimitedStorage", "nativeMessaging"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js"

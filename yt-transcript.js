@@ -1,11 +1,11 @@
-// In-page YouTube transcript extraction.
+// In-page YouTube transcript extraction — the FALLBACK path.
 //
-// WHY THIS EXISTS: YouTube blocks transcript fetching by ASN, not just by IP — datacenter
-// proxies don't help because the whole cloud ASN is flagged, and residential proxies have
-// been observed failing specifically when called from a cloud host. So the fetch can never
-// move to a Worker. But it never needed the laptop's Python host either: a content script
-// IS the YouTube web client — real session, real cookies, real BotGuard attestation,
-// residential IP. Extracting here removes the native-messaging host entirely.
+// The PRIMARY transcript source is the com.ytsummary native host (yt-summary.py:
+// youtube_transcript_api → Webshare proxy → yt-dlp) — faster (~2s) and it touches nothing on
+// the page. This DOM path runs only when that host is missing or fails. It stays because it
+// is the one path YouTube can never block: a content script IS the YouTube web client — real
+// session, real cookies, real BotGuard attestation, residential IP. (The fetch can never move
+// to a Worker: YouTube blocks by cloud ASN, not just IP.)
 //
 // WHY DOM AND NOT timedtext: since ~mid-2025 the captionTracks baseUrl returns an empty
 // 200 without a `&pot=` proof-of-origin token minted by BotGuard, which cannot be forged.

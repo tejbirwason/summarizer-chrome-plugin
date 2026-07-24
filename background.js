@@ -567,7 +567,7 @@ async function getVideoTranscriptAndSummarize(request, tab) {
     // laptop's Python host either: the content script is the real YouTube web client, with
     // the session and residential IP that make the request legitimate. If the caller already
     // scraped it (the common case — youtube-content.js extracts before messaging), use that.
-    const transcript = request.transcript || await requestTranscriptFromTab(tab, videoId);
+    const transcript = await fetchTranscript(tab, videoId, request.transcript);
     if (!transcript || !transcript.trim()) throw new Error('Empty transcript');
     // Replaces the placeholder job for this URL with the real one (same key), now with source.
     startSummary({ url, title, sourceText: transcript, isTranscript: true, videoId, tab, modelId: model.id, prompt, noPoster: request.noPoster });
@@ -586,13 +586,59 @@ async function getVideoTranscriptAndSummarize(request, tab) {
 }
 
 /**
- * Ask a tab's content script to open YouTube's transcript panel and scrape it.
+ * Transcript acquisition, in preference order:
+ *  1. The com.ytsummary native host (yt-summary.py: youtube_transcript_api → Webshare proxy →
+ *     yt-dlp). Fastest (~2s), touches nothing on the page, immune to YouTube's transcript-panel
+ *     markup roulette. Requires the laptop host to be installed, hence the fallbacks.
+ *  2. A transcript the content script already scraped and sent along (legacy callers).
+ *  3. DOM-scraping the watch page's transcript panel (yt-transcript.js) — the only path that
+ *     can never be IP/ASN-blocked, kept as the safety net.
+ */
+async function fetchTranscript(tab, videoId, preScraped) {
+  const native = await transcriptFromNativeHost(videoId);
+  if (native) return native;
+  if (preScraped && preScraped.trim()) return preScraped;
+  return requestTranscriptFromTab(tab, videoId);
+}
+
+/**
+ * One-shot native-host fetch. Resolves null (never rejects) on ANY failure — missing host
+ * manifest, host crash, "Error: ..." payloads, timeout — so callers just fall through to the
+ * DOM path. The host's own 3-tier fallback can be slow at worst (yt-dlp), hence the long cap.
+ */
+function transcriptFromNativeHost(videoId, timeoutMs = 90000) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    const timer = setTimeout(() => finish(null), timeoutMs);
+    try {
+      chrome.runtime.sendNativeMessage('com.ytsummary', { video_id: videoId }, (resp) => {
+        clearTimeout(timer);
+        if (chrome.runtime.lastError) {
+          console.warn('Native transcript host unavailable:', chrome.runtime.lastError.message);
+          return finish(null);
+        }
+        const text = (resp?.text || '').trim();
+        if (!text || /^Error/i.test(text)) {
+          console.warn('Native transcript host returned no transcript:', text.slice(0, 120));
+          return finish(null);
+        }
+        finish(text);
+      });
+    } catch (e) {
+      clearTimeout(timer);
+      console.warn('sendNativeMessage threw:', e.message);
+      finish(null);
+    }
+  });
+}
+
+/**
+ * DOM fallback: ask a tab's content script to open YouTube's transcript panel and scrape it.
  * If the tab isn't the watch page for this video (the feed-tile case), open the video in a
- * background tab, scrape, and close it. This is the least elegant part of the design and it
- * is unavoidable: the transcript is lazy-loaded when YouTube's own player opens the panel and
- * mints a proof-of-origin token, so you have to actually BE on the watch page. The upside is
- * that the job then runs entirely in the cloud, so a feed-tile click means "queue this" and
- * you read it on the dashboard.
+ * background tab, scrape, and close it. The transcript panel is lazy-loaded when YouTube's own
+ * player opens it and mints a proof-of-origin token, so you have to actually BE on the watch
+ * page for this path.
  */
 async function requestTranscriptFromTab(tab, videoId) {
   const onWatchPage = tab?.url?.includes(`watch?v=${videoId}`);
