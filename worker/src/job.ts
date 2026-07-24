@@ -35,6 +35,7 @@ interface JobState {
   activeModelId: string;
   generations: Record<string, Generation>;
   poster?: { state: string; falRequestId?: string; r2Key?: string; error?: string };
+  noPoster?: boolean; // "quick summary" — skip the explain-viz infographic entirely
 }
 
 const IDLE_TIMEOUT_MS = 150_000; // matches the local host's watchdog
@@ -64,14 +65,14 @@ export class SummaryJob extends DurableObject<Env> {
 
   async start(input: {
     id: string; url: string; title: string; kind: 'video' | 'page';
-    videoId?: string; source: string; modelId?: string; prompt?: string;
+    videoId?: string; source: string; modelId?: string; prompt?: string; noPoster?: boolean;
   }) {
     const model = findModel(input.modelId);
     const prompt = resolvePrompt(input.prompt, model);
     const job: JobState = {
       id: input.id, url: input.url, title: input.title, kind: input.kind,
       videoId: input.videoId, source: input.source,
-      activeModelId: model.id, generations: {},
+      activeModelId: model.id, generations: {}, noPoster: input.noPoster,
     };
     await this.ctx.storage.put('job', job);
     await this.upsertSummary(job);
@@ -177,7 +178,9 @@ export class SummaryJob extends DurableObject<Env> {
             modelId: model.id, content: gen.content,
             usedModel: gen.usedModel, durationMs: gen.durationMs,
           });
-          await this.kickPoster(job, gen);
+          // "Quick summary" opts out of the infographic. Skip fal entirely — no poster row,
+          // no R2 object, no alarm polling — so the rail thumbnail stays a plain placeholder.
+          if (!job.noPoster) await this.kickPoster(job, gen);
         },
         onError: async (e) => {
           if (idle) clearTimeout(idle);

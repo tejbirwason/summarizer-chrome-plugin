@@ -114,16 +114,19 @@ function createSummaryButton() {
     return btn;
   }
 
-  // ONE button. The old 🖥️ "Open in Claude Code" existed only because /explain-viz (and so
-  // fal) could only be reached from a Claude Code session; the Worker calls fal directly now,
-  // so ✨ does summary AND poster and there is nothing for a second button to do.
+  // TWO buttons again. ✨ is the full run (summary + explain-viz infographic poster). ⚡ is a
+  // "quick summary": same summary, but it tells the Worker to skip the infographic — faster,
+  // and no fal cost. Both scrape the transcript here in the page (the Worker can't — YouTube
+  // blocks the whole cloud ASN) and hand it to the background; only the noPoster flag differs.
   const summarizeBtn = makeButton('yt-summarize-btn', '✨', '#5C5CFF', '#4A4AD9');
-  summarizeBtn.title = 'Summarize (cloud) — summary + poster';
+  summarizeBtn.title = 'Summarize + infographic (cloud)';
+  const quickBtn = makeButton('yt-quick-btn', '⚡', '#2f8f7f', '#26766a');
+  quickBtn.title = 'Quick summary — no infographic';
 
-  summarizeBtn.onclick = async () => {
+  const runVideoSummary = async (btn, noPoster) => {
     const videoId = new URLSearchParams(window.location.search).get('v');
     if (!videoId) return;
-    summarizeBtn.setLoading(true);
+    btn.setLoading(true);
     // Pass the real video title (+ canonical url) so the summary/history isn't labelled "YouTube".
     // Prefer the on-page title element — document.title can still read "YouTube" on SPA nav.
     const title =
@@ -137,7 +140,7 @@ function createSummaryButton() {
     try {
       const r = await window.__ytTranscript.extractTranscript();
       if (!r.ok) {
-        summarizeBtn.setLoading(false);
+        btn.setLoading(false);
         alert(r.reason === 'no-captions'
           ? 'This video has no captions, so there is no transcript to summarize.'
           : `Couldn't read the transcript: ${r.detail}`);
@@ -145,22 +148,27 @@ function createSummaryButton() {
       }
       transcript = r.text;
     } catch (e) {
-      summarizeBtn.setLoading(false);
+      btn.setLoading(false);
       alert(`Transcript extraction failed: ${e.message}`);
       return;
     }
 
-    ytSend({ action: 'summarizeVideo', videoId, title, url: window.location.href, transcript });
+    ytSend({ action: 'summarizeVideo', videoId, title, url: window.location.href, transcript, noPoster });
   };
 
+  summarizeBtn.onclick = () => runVideoSummary(summarizeBtn, false);
+  quickBtn.onclick = () => runVideoSummary(quickBtn, true);
+
+  container.appendChild(quickBtn);
   container.appendChild(summarizeBtn);
   player.appendChild(container);
 
   chrome.runtime.onMessage.addListener((request) => {
-    // Clear spinner once streaming starts or fails — initSummary fires before any
-    // tokens, so keep the spinner until the first real content/error event.
+    // Clear spinners once streaming starts or fails — initSummary fires before any
+    // tokens, so keep them until the first real content/error event.
     if (['updateSummary', 'summaryComplete', 'summaryError', 'displaySummary'].includes(request.action)) {
       summarizeBtn.setLoading(false);
+      quickBtn.setLoading(false);
     }
   });
 }

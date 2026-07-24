@@ -264,7 +264,9 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
       .cs-skel { height: 12px; border-radius: 6px; background: ${T.surface3}; margin: 10px 0; animation: cs-pulse 1.4s ease-in-out infinite; }
       .cs-caret { display: inline-block; width: 7px; height: 15px; margin-left: 2px; background: ${T.accent}; vertical-align: text-bottom; animation: cs-pulse 1s ease-in-out infinite; border-radius: 2px; }
       .cs-error { color: ${T.textError}; background: rgba(244,163,163,.08); border: 1px solid rgba(244,163,163,.25); border-radius: 9px; padding: 10px 12px; font-size: 14px; }
-      .cs-meta { color: ${T.textMuted}; font-size: 11.5px; margin-top: 8px; }
+      .cs-meta { color: ${T.textMuted}; font-size: 11.5px; margin-top: 8px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+      .cs-dashlink { background: none; border: none; color: ${T.accent}; cursor: pointer; font: inherit; font-size: 11.5px; padding: 0; opacity: .85; transition: opacity .12s; }
+      .cs-dashlink:hover { opacity: 1; text-decoration: underline; }
 
       .cs-composer { flex-shrink: 0; border-top: 1px solid ${T.borderSubtle}; background: ${T.surface0}; padding: 10px; display: flex; gap: 8px; align-items: flex-end; }
       .cs-composer textarea { flex: 1; background: ${T.surface2}; border: 1px solid ${T.borderStrong}; color: ${T.textPrimary};
@@ -356,20 +358,24 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
       return btn;
     }
 
-    const summarizeFab = makeFab('✨', T.surface2, 'Summarize selection');
-    const ccFab = makeFab('🖥️', T.surface2, 'Open selection in Claude Code');
+    // TWO FABs: ✨ full (summary + explain-viz infographic) and ⚡ quick (summary only, the
+    // Worker skips the infographic). The ⚡ took the slot the old 🖥️ "Open in Claude Code" FAB
+    // held — that path died when the native hosts were removed (background no longer handles
+    // openInCC), so this reuses its footprint for something that works.
+    const summarizeFab = makeFab('✨', T.surface2, 'Summarize + infographic');
+    const quickFab = makeFab('⚡', T.surface2, 'Quick summary — no infographic');
 
     summarizeFab.onclick = () => {
       const text = window.getSelection().toString().trim();
       if (!text) return;
       summarizeFab.setLoading(true);
-      startNewSummary(text);
+      startNewSummary(text, false);
     };
-    ccFab.onclick = () => {
+    quickFab.onclick = () => {
       const text = window.getSelection().toString().trim();
       if (!text) return;
-      ccFab.setLoading(true);
-      sendToBackground({ action: 'openInCC', text, title: S.title, url: S.fullUrl });
+      quickFab.setLoading(true);
+      startNewSummary(text, true);
     };
 
     document.addEventListener('selectionchange', () => {
@@ -378,11 +384,11 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
     });
 
     bar.appendChild(summarizeFab);
-    bar.appendChild(ccFab);
+    bar.appendChild(quickFab);
     document.body.appendChild(bar);
   }
 
-  function startNewSummary(text) {
+  function startNewSummary(text, noPoster) {
     // Optimistically open the panel with a generating state for the preferred model.
     const modelId = S.activeModelId || S.config?.models?.[0]?.id;
     S.isTranscript = false;
@@ -391,7 +397,7 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
     m.messages = []; m.streaming = ''; m.inProgress = true; m.complete = false;
     S.view = 'summary';
     openPanel();
-    sendToBackground({ action: 'summarizeDual', text, url: S.fullUrl, title: S.title, prompt: S.prompt || undefined });
+    sendToBackground({ action: 'summarizeDual', text, url: S.fullUrl, title: S.title, prompt: S.prompt || undefined, noPoster: Boolean(noPoster) });
   }
 
   // ===========================================================================
@@ -705,7 +711,22 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
       const meta = document.createElement('div');
       meta.className = 'cs-meta';
       const um = m.usedModel || modelMeta(S.activeModelId) || {};
-      meta.textContent = `${um.icon || ''} ${um.name || ''} · ${(m.duration / 1000).toFixed(1)}s`;
+      const label = document.createElement('span');
+      label.textContent = `${um.icon || ''} ${um.name || ''} · ${(m.duration / 1000).toFixed(1)}s`;
+      meta.appendChild(label);
+      // Deep link to this exact summary on the hosted dashboard (the "Cloudflare page"). The
+      // background builds the URL because it holds the Worker base + token; we just open it.
+      const dash = document.createElement('button');
+      dash.className = 'cs-dashlink';
+      dash.textContent = 'View on dashboard ↗';
+      dash.title = 'Open this summary on the dashboard';
+      const linkFor = S.foreignUrl || S.fullUrl;
+      dash.onclick = () => {
+        sendToBackground({ action: 'getDashboardLink', url: linkFor }, (resp) => {
+          if (resp?.ok && resp.url) { try { window.open(resp.url, '_blank'); } catch (e) {} }
+        });
+      };
+      meta.appendChild(dash);
       scroll.appendChild(meta);
     }
 

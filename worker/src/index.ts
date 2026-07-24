@@ -97,7 +97,7 @@ export default {
       if (p === '/api/summarize' && req.method === 'POST') {
         const b = (await req.json()) as {
           url: string; title?: string; kind?: 'video' | 'page';
-          videoId?: string; text: string; modelId?: string; prompt?: string;
+          videoId?: string; text: string; modelId?: string; prompt?: string; noPoster?: boolean;
         };
         if (!b.url || !b.text?.trim()) return json({ error: 'url and text required' }, { status: 400 }, origin);
 
@@ -112,7 +112,7 @@ export default {
         const stub = env.JOB.get(env.JOB.idFromName(id));
         const res = await stub.start({
           id, url: b.url, title: b.title ?? b.url, kind: b.kind ?? 'page',
-          videoId: b.videoId, source: b.text, modelId, prompt: b.prompt,
+          videoId: b.videoId, source: b.text, modelId, prompt: b.prompt, noPoster: b.noPoster,
         });
         return json(res, {}, origin);
       }

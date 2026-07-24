@@ -210,7 +210,7 @@ function ensureModel(job, modelId) {
   return job.models[modelId];
 }
 
-function newJob({ url, fullUrl, title, sourceText, isTranscript, prompt, videoId }) {
+function newJob({ url, fullUrl, title, sourceText, isTranscript, prompt, videoId, noPoster }) {
   return {
     url,                                   // normalized (origin+pathname) — the storage key body
     fullUrl: fullUrl || url,               // exact URL, for "open page" links in history
@@ -218,6 +218,7 @@ function newJob({ url, fullUrl, title, sourceText, isTranscript, prompt, videoId
     sourceText: (sourceText || '').slice(0, 120000),  // raw text/transcript, for regenerate & prompt-edit
     isTranscript: Boolean(isTranscript),
     videoId: videoId || '',                // set for YouTube — join key for the generated poster
+    noPoster: Boolean(noPoster),           // "quick summary" — tells the Worker to skip the infographic
     prompt: prompt || '',                  // the (possibly user-edited) summarization instruction
     activeModelId: null,                   // model currently shown / most recently generated
     models: {},                            // modelId -> per-model slot
@@ -320,6 +321,7 @@ async function streamModel(job, tab, modelId, { isFollowup, prompt } = {}) {
         url: job.fullUrl || job.url, title: job.title,
         kind: job.isTranscript ? 'video' : 'page', videoId: job.videoId,
         text: job.sourceText, modelId, prompt: prompt ?? job.prompt,
+        noPoster: job.noPoster,
       }) });
       job.startedRemote = true;
     }
@@ -390,13 +392,13 @@ async function streamModel(job, tab, modelId, { isFollowup, prompt } = {}) {
 
 // Start (or restart) a page's summary from scratch. Creates a fresh job, so re-summarizing a
 // page replaces its prior job for that URL.
-function startSummary({ url, title, sourceText, isTranscript, videoId, tab, modelId, prompt }) {
+function startSummary({ url, title, sourceText, isTranscript, videoId, tab, modelId, prompt, noPoster }) {
   const nurl = normUrl(url);
   const model = findModel(modelId) || aiConfig.models[0];
   modelId = model.id;
   prompt = prompt || model.prompt || aiConfig.defaultPrompt;
 
-  const job = newJob({ url: nurl, fullUrl: url, title, sourceText, isTranscript, prompt, videoId });
+  const job = newJob({ url: nurl, fullUrl: url, title, sourceText, isTranscript, prompt, videoId, noPoster });
   jobs[nurl] = job;
 
   const m = ensureModel(job, modelId);
@@ -541,7 +543,7 @@ async function getVideoTranscriptAndSummarize(request, tab) {
   // Create + persist a placeholder job right away (before the transcript exists) so the item
   // shows up in history immediately as "generating", and open the panel in a "fetching" state so
   // there's no dead time between the click and visible feedback.
-  const early = newJob({ url: nurl, fullUrl: url, title, sourceText: '', isTranscript: true, prompt, videoId });
+  const early = newJob({ url: nurl, fullUrl: url, title, sourceText: '', isTranscript: true, prompt, videoId, noPoster: request.noPoster });
   const em = ensureModel(early, model.id);
   em.inProgress = true;
   early.activeModelId = model.id;
@@ -568,7 +570,7 @@ async function getVideoTranscriptAndSummarize(request, tab) {
     const transcript = request.transcript || await requestTranscriptFromTab(tab, videoId);
     if (!transcript || !transcript.trim()) throw new Error('Empty transcript');
     // Replaces the placeholder job for this URL with the real one (same key), now with source.
-    startSummary({ url, title, sourceText: transcript, isTranscript: true, videoId, tab, modelId: model.id, prompt });
+    startSummary({ url, title, sourceText: transcript, isTranscript: true, videoId, tab, modelId: model.id, prompt, noPoster: request.noPoster });
   } catch (error) {
     console.error('Error fetching video transcript:', error);
     // Drop the placeholder so a failed fetch doesn't leave a frozen "generating" item in history.
@@ -666,7 +668,8 @@ function handleRequest(request, sender, sendResponse) {
           isTranscript: false,
           tab,
           modelId,
-          prompt
+          prompt,
+          noPoster: request.noPoster
         });
       });
     return true;
@@ -737,6 +740,26 @@ function handleRequest(request, sender, sendResponse) {
   if (request.action === 'getConfig') {
     sendResponse({ config: aiConfig });
     return true;
+  }
+
+  // Build a deep link into the hosted dashboard (the Cloudflare page) that opens THIS summary.
+  // The dashboard id is the Worker's normalized url, which equals the extension's normUrl for
+  // every case that matters (YouTube keeps ?v=, other pages strip the query). The token is the
+  // user's own and rides in the query so the link works from a cold browser; the dashboard
+  // strips it from the address bar on load and keeps only the #s= hash.
+  if (request.action === 'getDashboardLink') {
+    (async () => {
+      try {
+        const { base, token } = await workerCreds();
+        const nurl = normUrl(request.url || '');
+        if (!base || !nurl) { sendResponse({ ok: false }); return; }
+        const q = token ? `?token=${encodeURIComponent(token)}` : '';
+        sendResponse({ ok: true, url: `${base}/${q}#s=${encodeURIComponent(nurl)}`, base });
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e.message || e) });
+      }
+    })();
+    return true; // async
   }
 
   return false;

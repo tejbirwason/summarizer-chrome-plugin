@@ -170,6 +170,15 @@ let ALL = [];
 let selId = null;
 let filter = '';
 
+// Deep link: the extension opens /?token=…#s=<encoded summary id> to jump straight to one
+// summary. Capture it before the token gets scrubbed from the address bar. Cleared once used
+// so the 4s rail refresh never yanks the reader back to it.
+function readHashId() {
+  const m = /[#&]s=([^&]+)/.exec(location.hash || '');
+  try { return m ? decodeURIComponent(m[1]) : null; } catch { return null; }
+}
+let deepLinkId = readHashId();
+
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -303,6 +312,12 @@ function renderRail() {
 async function open(id) {
   selId = id;
   renderRail();
+  // Keep the address bar pointing at the open summary so it stays a shareable deep link.
+  history.replaceState({}, '', location.pathname + `#s=${encodeURIComponent(id)}`);
+  // Bring the selected rail row into view (it may be far down a long list, or off-screen
+  // entirely when arrived at via deep link).
+  const selEl = [...document.querySelectorAll('.item')].find((el) => el.dataset.id === id);
+  if (selEl) selEl.scrollIntoView({ block: 'nearest' });
   const { summary, generations = [], poster } = await api(`/api/summary/${encodeURIComponent(id)}`);
   if (!summary) return;
   // Prefer a real generation over an imported one when a page has both.
@@ -342,7 +357,10 @@ async function refresh() {
   const { summaries = [] } = await api('/api/summaries');
   ALL = summaries;
   renderRail();
-  if (!selId && ALL.length) open(ALL[0].id);
+  if (!selId) {
+    if (deepLinkId) { const want = deepLinkId; deepLinkId = null; open(want); }
+    else if (ALL.length) open(ALL[0].id);
+  }
 }
 
 $('#list').addEventListener('click', (e) => {
@@ -366,7 +384,8 @@ if (!TOKEN) {
   $('#auth').hidden = false;
 } else {
   $('#app').hidden = false;
-  history.replaceState({}, '', location.pathname); // keep the token out of the URL bar
+  // Keep the token out of the URL bar, but preserve the #s= deep link so the address stays shareable.
+  history.replaceState({}, '', location.pathname + (deepLinkId ? `#s=${encodeURIComponent(deepLinkId)}` : ''));
   refresh();
   // Only the rail refreshes on a timer — re-fetching the open document every 4s would
   // yank the page out from under someone mid-read.
