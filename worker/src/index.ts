@@ -1,7 +1,9 @@
+import { routeAgentRequest } from 'agents';
 import { SummaryJob, type Env } from './job';
+import { SummaryChat } from './chat';
 import { listModels, DEFAULT_MODEL_ID, DEFAULT_PROMPT } from './config';
 
-export { SummaryJob };
+export { SummaryJob, SummaryChat };
 
 // Port of background.js's normUrl: strip hash/tracking but KEEP YouTube's ?v=, since that
 // is the only thing distinguishing one video from another.
@@ -136,6 +138,16 @@ export default {
     // so the rail/hero don't pull 10–14 MB PNGs. Transformed responses are edge-cached.
     if (p.startsWith('/poster/')) {
       return servePoster(req, env, ctx, origin);
+    }
+
+    // Chat agent (WebSocket + HTTP). Same APP_TOKEN gate as /api/ — browsers can't set
+    // headers on a WebSocket, so the ?token= query-param path of authed() is the one that
+    // matters here. routeAgentRequest maps /agents/summary-chat/<name> onto the SummaryChat
+    // binding and hands the request to the DO instance named <name>.
+    if (p.startsWith('/agents/')) {
+      if (!authed(req, env)) return json({ error: 'unauthorized' }, { status: 401 }, origin);
+      const routed = await routeAgentRequest(req, env);
+      return routed ?? json({ error: 'not found' }, { status: 404 }, origin);
     }
 
     if (!p.startsWith('/api/')) return env.ASSETS.fetch(req);

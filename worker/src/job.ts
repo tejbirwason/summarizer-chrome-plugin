@@ -7,6 +7,9 @@ export interface Env {
   DB: D1Database;
   POSTERS: R2Bucket;
   JOB: DurableObjectNamespace<SummaryJob>;
+  // Chat agent (@cloudflare/ai-chat). Binding name must stay "SummaryChat" — routeAgentRequest
+  // kebab-cases it into the /agents/summary-chat/<name> URL space the dashboard calls.
+  SummaryChat: DurableObjectNamespace<import('./chat').SummaryChat>;
   ASSETS: Fetcher;
   IMAGES: ImagesBinding;
   OPENROUTER_API_KEY: string;

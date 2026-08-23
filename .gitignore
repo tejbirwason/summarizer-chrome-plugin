@@ -76,3 +76,4 @@ research/
 # Worker
 worker/node_modules/
 worker/.wrangler/
+.dev.vars

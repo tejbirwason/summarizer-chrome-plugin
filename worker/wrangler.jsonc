@@ -23,9 +23,17 @@
   // what preserves "keeps generating after you close the tab". ctx.waitUntil() would only
   // buy 30s past disconnect — nowhere near a long reasoning generation.
   "durable_objects": {
-    "bindings": [{ "name": "JOB", "class_name": "SummaryJob" }]
+    "bindings": [
+      { "name": "JOB", "class_name": "SummaryJob" },
+      // Per-summary chat agent (@cloudflare/ai-chat). Binding name is kebab-cased by
+      // routeAgentRequest into the /agents/summary-chat/* URL space — don't rename casually.
+      { "name": "SummaryChat", "class_name": "SummaryChat" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SummaryJob"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["SummaryJob"] },
+    { "tag": "v2", "new_sqlite_classes": ["SummaryChat"] }
+  ],
   // Waiting on OpenRouter is I/O, not CPU, so this ceiling is only for markdown/JSON work.
   "limits": { "cpu_ms": 300000 }
 }

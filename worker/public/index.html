@@ -332,6 +332,63 @@
     box-shadow: 0 8px 24px rgba(0,0,0,.35); max-width: min(90vw, 420px);
     text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* ---------- chat drawer (slides in from the right) ---------- */
+  #chat { position: fixed; top: 0; right: 0; bottom: 0; z-index: 50;
+    width: min(480px, 100vw);
+    background: var(--panel); border-left: 1px solid var(--line);
+    box-shadow: -24px 0 48px rgba(0,0,0,.5);
+    display: flex; flex-direction: column;
+    transform: translateX(103%); transition: transform .22s ease; }
+  #chat.open { transform: translateX(0); }
+  .chat-head { display: flex; align-items: center; gap: 10px; position: relative;
+    padding: 12px 14px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
+  .chat-title { font-size: 12px; color: var(--ink-dim); white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; flex: 1; min-width: 0; }
+  .model-pill { display: flex; align-items: center; gap: 6px; cursor: pointer; flex-shrink: 0;
+    border: 1px solid var(--teal); border-radius: 999px; padding: 4px 10px;
+    font-size: 12px; color: var(--ink); background: transparent; font-family: inherit; }
+  .model-pill .dot { width: 7px; height: 7px; border-radius: 4px; background: var(--teal); }
+  #chat-model-menu { position: absolute; top: 42px; right: 44px; z-index: 6;
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px;
+    padding: 6px; display: none; min-width: 190px; box-shadow: 0 10px 30px rgba(0,0,0,.45); }
+  #chat-model-menu.open { display: block; }
+  #chat-model-menu button { display: flex; width: 100%; gap: 8px; align-items: center;
+    background: none; border: 0; color: var(--ink); font: inherit; font-size: 13px;
+    padding: 7px 9px; border-radius: 7px; cursor: pointer; text-align: left; }
+  #chat-model-menu button:hover { background: var(--panel); }
+  #chat-model-menu button.sel { color: var(--teal); }
+  .chat-thread { flex: 1; overflow-y: auto; padding: 16px; display: flex;
+    flex-direction: column; gap: 14px; }
+  .turn-user { align-self: flex-end; max-width: 82%; background: var(--amber); color: #201a10;
+    padding: 9px 13px; border-radius: 12px 12px 3px 12px; font-size: 14px;
+    white-space: pre-wrap; overflow-wrap: anywhere; }
+  .turn-ai { align-self: flex-start; max-width: 94%; display: flex; flex-direction: column; gap: 5px; }
+  .turn-ai .who { font-size: 10px; letter-spacing: .07em; color: var(--ink-faint); }
+  .turn-ai .who .dot { display: inline-block; width: 6px; height: 6px; border-radius: 3px;
+    background: var(--teal); margin-right: 5px; vertical-align: 1px; }
+  .turn-ai .body { background: var(--bg); border: 1px solid var(--line);
+    border-radius: 3px 12px 12px 12px; padding: 10px 13px; font-size: 14px; min-width: 0; }
+  .turn-ai .body > :first-child { margin-top: 0; }
+  .turn-ai .body > :last-child { margin-bottom: 0; }
+  .turn-ai .body pre { overflow-x: auto; background: var(--panel-2); padding: 8px; border-radius: 8px; }
+  .turn-ai .body .table-wrap { overflow-x: auto; }
+  .turn-ai.err .body { border-color: var(--red); color: var(--red); }
+  .chat-empty { color: var(--ink-faint); font-size: 13px; text-align: center; margin-top: 40px;
+    padding: 0 20px; line-height: 1.6; }
+  .stream-caret { display: inline-block; width: 8px; height: 14px; background: var(--teal);
+    vertical-align: -2px; margin-left: 2px; opacity: .8; animation: caret 1s steps(1) infinite; }
+  @keyframes caret { 50% { opacity: 0; } }
+  .chat-compose { border-top: 1px solid var(--line); padding: 12px 16px 6px; flex-shrink: 0; }
+  .chat-inputrow { display: flex; gap: 10px; align-items: flex-end;
+    background: var(--bg); border: 1px solid var(--line); border-radius: 12px;
+    padding: 9px 10px 9px 13px; }
+  .chat-inputrow:focus-within { border-color: var(--teal); }
+  #chat-input { flex: 1; background: none; border: 0; outline: 0; resize: none; color: var(--ink);
+    font: inherit; font-size: 14px; line-height: 1.45; max-height: 130px; }
+  #chat-send { width: 30px; height: 30px; border-radius: 8px; border: 0; cursor: pointer;
+    background: var(--teal); color: #10201c; font-size: 15px; flex-shrink: 0; }
+  .chat-hint { font-size: 10px; color: var(--ink-faint); padding: 6px 2px 10px; }
 </style>
 </head>
 <body>
@@ -363,6 +420,11 @@
         </svg>
         <span class="unread-badge" id="unread-badge" aria-hidden="true"></span>
       </button>
+      <button class="icon-btn" id="btn-chat" title="Chat about this (A)" aria-label="Chat about this summary">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 11.5a7.5 7.5 0 0 1-7.5 7.5H9l-5 3 1.6-4.6A7.5 7.5 0 1 1 21 11.5z"/>
+        </svg>
+      </button>
       <button class="icon-btn primary" id="btn-detail" title="Video + summary (I / Space)" aria-label="Open video and summary">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="9"/>
@@ -389,7 +451,7 @@
 
   <div class="edge edge-bottom">
     <span class="counter fade" id="counter"></span>
-    <span class="hint fade">← → navigate · I summary</span>
+    <span class="hint fade">← → navigate · I summary · A chat</span>
   </div>
 </div>
 
@@ -423,6 +485,28 @@
     <div class="detail-body" id="detail-body"></div>
   </div>
 </div>
+
+<!-- Chat drawer: per-summary conversation with the transcript as context -->
+<aside id="chat" aria-hidden="true">
+  <div class="chat-head">
+    <div class="chat-title" id="chat-title"></div>
+    <button class="model-pill" id="chat-model-btn" title="Model that answers the next question">
+      <span class="dot"></span><span id="chat-model-name">…</span><span style="color:var(--ink-faint)">▾</span>
+    </button>
+    <button class="icon-btn" id="btn-chat-close" title="Close (Esc)" aria-label="Close chat">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"/></svg>
+    </button>
+    <div id="chat-model-menu"></div>
+  </div>
+  <div class="chat-thread" id="chat-thread"></div>
+  <div class="chat-compose">
+    <div class="chat-inputrow">
+      <textarea id="chat-input" rows="1" placeholder="Ask about this…"></textarea>
+      <button id="chat-send" title="Send (Enter)">↑</button>
+    </div>
+    <div class="chat-hint">Enter to send · Shift+Enter newline · answers keep generating if you close this</div>
+  </div>
+</aside>
 
 <div id="toast" role="status" aria-live="polite"></div>
 
@@ -833,6 +917,9 @@ async function open(id) {
   renderRail();
   history.replaceState({}, '', location.pathname + `#s=${encodeURIComponent(id)}`);
 
+  // Chat follows the selection: stepping posts re-attaches the drawer to the new summary.
+  if (chatOpen) chatAttach(id);
+
   // Keep drawer selection visible if open.
   if (drawerOpen) {
     const selEl = [...document.querySelectorAll('.item')].find((el) => el.dataset.id === id);
@@ -959,6 +1046,239 @@ async function stepPost(dir) {
   await open(next.id);
 }
 
+// ---------- chat (per-summary agent, @cloudflare/ai-chat wire protocol) ----------
+// One SummaryChat Durable Object per summary; instance name = encodeURIComponent(id).
+// Plain WebSocket + JSON frames — no client library:
+//   → cf_agent_use_chat_request   {id, init:{method:'POST', body:'{messages, modelId}'}}
+//   ← cf_agent_use_chat_response  {id, body:<UI-stream SSE text>, done}
+//   ← cf_agent_chat_messages      {messages}  (authoritative persisted thread)
+//   ⇄ cf_agent_stream_resume_*    replay of a stream that survived a reload
+let chatOpen = false;
+let chatWS = null;
+let chatFor = null;            // summary id the socket is attached to
+let chatMsgs = [];             // UIMessage[] from the agent
+let chatModels = [];
+let chatModelId = localStorage.getItem('summarizer_chat_model') || null;
+let chatStreaming = false;
+let chatBuf = '';              // partial SSE line carry
+let chatLive = '';             // text of the in-flight answer
+let chatFinal = null;          // finished answer shown until get-messages confirms it
+let chatErr = '';
+let chatWSGen = 0;             // invalidates stale sockets after re-attach
+
+const chatAgentPath = (id) => `/agents/summary-chat/${encodeURIComponent(id)}`;
+const chatModel = () => chatModels.find((m) => m.id === chatModelId) || chatModels[0] || null;
+
+async function loadChatModels() {
+  if (chatModels.length) return;
+  try {
+    const { models = [], defaultModelId } = await api('/api/models');
+    chatModels = models;
+    if (!chatModelId || !models.some((m) => m.id === chatModelId)) chatModelId = defaultModelId;
+    renderChatModel();
+  } catch {}
+}
+
+function renderChatModel() {
+  const m = chatModel();
+  $('#chat-model-name').textContent = m ? `${m.icon} ${m.name}` : '…';
+  $('#chat-model-menu').innerHTML = chatModels.map((x) =>
+    `<button data-id="${esc(x.id)}" class="${x.id === chatModelId ? 'sel' : ''}">${esc(x.icon)} ${esc(x.name)}</button>`).join('');
+}
+
+const msgText = (m) => (m.parts || []).filter((p) => p.type === 'text').map((p) => p.text).join('');
+
+function aiTurn(label, inner) {
+  return `<div class="turn-ai"><div class="who"><span class="dot"></span>${esc(label).toUpperCase()}</div><div class="body">${inner}</div></div>`;
+}
+
+function renderChat() {
+  const el = $('#chat-thread');
+  const stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 60;
+  let html = '';
+  for (const m of chatMsgs) {
+    const text = msgText(m);
+    if (!text) continue;
+    if (m.role === 'user') html += `<div class="turn-user">${esc(text)}</div>`;
+    else {
+      const meta = m.metadata || {};
+      html += aiTurn(`${meta.modelIcon || ''} ${meta.modelName || 'assistant'}`.trim(), md(text));
+    }
+  }
+  if (chatFinal) html += aiTurn(chatFinal.label, md(chatFinal.text));
+  if (chatStreaming) {
+    const m = chatModel();
+    const label = m ? `${m.icon} ${m.name}` : 'assistant';
+    html += aiTurn(label, (chatLive ? md(chatLive) : '<span style="color:var(--ink-faint)">thinking…</span>') + '<span class="stream-caret"></span>');
+  }
+  if (chatErr) html += `<div class="turn-ai err"><div class="body">${esc(chatErr)}</div></div>`;
+  if (!html) html = `<div class="chat-empty">Ask anything about this one — the full transcript is the context.<br/>Switch the answering model per question with the pill above.</div>`;
+  el.innerHTML = html;
+  if (stick) el.scrollTop = el.scrollHeight;
+}
+
+async function chatFetchHistory(id) {
+  try {
+    const r = await fetch(chatAgentPath(id) + '/get-messages', { headers: { Authorization: `Bearer ${TOKEN}` } });
+    if (!r.ok) return;
+    const msgs = await r.json();
+    if (chatFor !== id) return;
+    chatMsgs = Array.isArray(msgs) ? msgs : [];
+    // The refetched list includes the finished answer — drop the local stand-in.
+    if (chatFinal && chatMsgs.some((m) => m.role === 'assistant' && msgText(m) === chatFinal.text)) chatFinal = null;
+    renderChat();
+  } catch {}
+}
+
+async function chatAttach(id) {
+  if (!id || chatFor === id) return;
+  chatFor = id;
+  chatMsgs = []; chatLive = ''; chatBuf = ''; chatFinal = null; chatErr = ''; chatStreaming = false;
+  $('#chat-title').textContent = (ALL.find((s) => s.id === id)?.title) || id;
+  renderChat();
+  loadChatModels();
+  await chatFetchHistory(id);
+  chatConnect(id);
+}
+
+function chatConnect(id) {
+  const gen = ++chatWSGen;
+  try { chatWS?.close(); } catch {}
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${proto}://${location.host}${chatAgentPath(id)}?token=${encodeURIComponent(TOKEN)}`);
+  chatWS = ws;
+  ws.onopen = () => {
+    if (gen !== chatWSGen) return;
+    // Probe for an answer that kept generating while we were away. The server replies
+    // stream_resuming (chunks replay after our ack), _none, or _pending.
+    ws.send(JSON.stringify({ type: 'cf_agent_stream_resume_request', probeId: Math.random().toString(36).slice(2, 10) }));
+  };
+  ws.onmessage = (ev) => { if (gen === chatWSGen && typeof ev.data === 'string') chatFrame(ev.data); };
+  ws.onclose = () => {
+    if (gen !== chatWSGen) return;
+    chatWS = null;
+    if (chatOpen && chatFor === id) setTimeout(() => { if (gen === chatWSGen && chatOpen) chatConnect(id); }, 1500);
+  };
+}
+
+// Each cf_agent_use_chat_response frame body is ONE UI-stream part as bare JSON
+// (the server unwraps the SSE framing before broadcasting). Keep a data:-line
+// fallback in case a plaintext/legacy chunk ever comes through.
+function chatChunk(body) {
+  if (!body) return;
+  let j = null;
+  try { j = JSON.parse(body); } catch {
+    const s = String(body);
+    if (s.includes('data:')) {
+      for (const line of s.split('\n')) {
+        const t = line.trim();
+        if (t.startsWith('data:')) chatChunk(t.slice(5).trim());
+      }
+    } else {
+      // Plaintext body — the error path emits these ("An error occurred."). Show it.
+      chatErr = s;
+    }
+    return;
+  }
+  if (j.type === 'text-delta' && typeof j.delta === 'string') chatLive += j.delta;
+  else if (j.type === 'error') chatErr = String(j.errorText || 'stream error');
+}
+
+function chatFrame(raw) {
+  let f; try { f = JSON.parse(raw); } catch { return; }
+  if (f.type === 'cf_agent_chat_messages') {
+    chatMsgs = f.messages || [];
+    if (chatFinal && chatMsgs.some((m) => m.role === 'assistant' && msgText(m) === chatFinal.text)) chatFinal = null;
+    renderChat();
+  } else if (f.type === 'cf_agent_use_chat_response') {
+    if (!chatStreaming) { chatStreaming = true; chatLive = ''; chatBuf = ''; }
+    chatChunk(f.body || '');
+    if (f.done) {
+      chatStreaming = false;
+      if (chatLive) {
+        const m = chatModel();
+        chatFinal = { text: chatLive, label: m ? `${m.icon} ${m.name}` : 'assistant' };
+      }
+      chatLive = ''; chatBuf = '';
+      renderChat();
+      // Swap the local stand-in for the persisted message (carries server metadata).
+      if (chatFor) setTimeout(() => chatFetchHistory(chatFor), 400);
+    } else renderChat();
+  } else if (f.type === 'cf_agent_stream_resuming') {
+    chatStreaming = true; chatLive = ''; chatBuf = '';
+    chatWS?.send(JSON.stringify({ type: 'cf_agent_stream_resume_ack', id: f.id }));
+    renderChat();
+  } else if (f.type === 'cf_agent_chat_clear') {
+    chatMsgs = []; chatFinal = null; renderChat();
+  }
+}
+
+function chatSend() {
+  const ta = $('#chat-input');
+  const text = ta.value.trim();
+  if (!text || !chatFor) return;
+  if (!chatWS || chatWS.readyState !== 1) { toast('Chat is reconnecting — try again in a second'); chatConnect(chatFor); return; }
+  chatErr = '';
+  if (chatFinal) { // last answer never got confirmed by a refetch; keep it in the outgoing thread
+    chatMsgs.push({ id: crypto.randomUUID(), role: 'assistant', parts: [{ type: 'text', text: chatFinal.text }] });
+    chatFinal = null;
+  }
+  chatMsgs.push({ id: crypto.randomUUID(), role: 'user', parts: [{ type: 'text', text }] });
+  ta.value = ''; ta.style.height = 'auto';
+  chatStreaming = true; chatLive = ''; chatBuf = '';
+  renderChat();
+  chatWS.send(JSON.stringify({
+    type: 'cf_agent_use_chat_request',
+    id: crypto.randomUUID(),
+    init: { method: 'POST', body: JSON.stringify({ messages: chatMsgs, modelId: chatModelId }) },
+  }));
+}
+
+async function openChat() {
+  if (!selId) return;
+  chatOpen = true;
+  $('#chat').classList.add('open');
+  $('#chat').setAttribute('aria-hidden', 'false');
+  await chatAttach(selId);
+  setTimeout(() => $('#chat-input').focus(), 120);
+}
+
+function closeChat() {
+  if (!chatOpen) return;
+  chatOpen = false;
+  // Socket stays open: an in-flight answer keeps generating server-side either way,
+  // and the resume handshake catches us up on reopen.
+  $('#chat').classList.remove('open');
+  $('#chat').setAttribute('aria-hidden', 'true');
+  $('#chat-model-menu').classList.remove('open');
+}
+
+$('#btn-chat').addEventListener('click', () => (chatOpen ? closeChat() : openChat()));
+$('#btn-chat-close').addEventListener('click', () => closeChat());
+$('#chat-send').addEventListener('click', () => chatSend());
+$('#chat-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); chatSend(); }
+});
+$('#chat-input').addEventListener('input', (e) => {
+  const ta = e.target;
+  ta.style.height = 'auto';
+  ta.style.height = Math.min(ta.scrollHeight, 130) + 'px';
+});
+$('#chat-model-btn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  loadChatModels();
+  $('#chat-model-menu').classList.toggle('open');
+});
+$('#chat-model-menu').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-id]');
+  if (!b) return;
+  chatModelId = b.dataset.id;
+  try { localStorage.setItem('summarizer_chat_model', chatModelId); } catch {}
+  renderChatModel();
+  $('#chat-model-menu').classList.remove('open');
+});
+document.addEventListener('click', () => $('#chat-model-menu')?.classList.remove('open'));
+
 // ---------- events ----------
 $('#list').addEventListener('click', (e) => {
   const it = e.target.closest('.item');
@@ -1023,14 +1343,26 @@ for (const sel of ['.edge-left', '.edge-right', '.edge-top', '.edge-bottom']) {
 document.addEventListener('keydown', (e) => {
   const tag = (e.target && e.target.tagName) || '';
   if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target?.isContentEditable) {
-    if (e.key === 'Escape' && drawerOpen) { e.preventDefault(); closeDrawer(); }
+    if (e.key === 'Escape') {
+      if (chatOpen) { e.preventDefault(); closeChat(); }
+      else if (drawerOpen) { e.preventDefault(); closeDrawer(); }
+    }
     return;
   }
 
   if (e.key === 'Escape') {
     e.preventDefault();
-    if (detailOpen) closeDetail();
+    if (chatOpen) closeChat();
+    else if (detailOpen) closeDetail();
     else if (drawerOpen) closeDrawer();
+    return;
+  }
+
+  // `a` — chat drawer for the open summary.
+  if ((e.key === 'a' || e.key === 'A') && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    e.preventDefault();
+    if (chatOpen) closeChat();
+    else openChat();
     return;
   }
 
