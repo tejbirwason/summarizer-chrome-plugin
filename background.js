@@ -523,6 +523,33 @@ async function handleListSummaries(sendResponse) {
 // YouTube transcript fetching (unchanged native protocol) + Claude Code opener (unchanged).
 // ===========================================================================================
 
+// True when we only have the tab-placeholder name YouTube paints before the video hydrates.
+function isGenericYtTitle(t) {
+  const s = String(t || '').replace(/^\(\d+\)\s+/, '').replace(/\s*-\s*YouTube\s*$/i, '').trim();
+  return !s || /^youtube$/i.test(s);
+}
+
+// oEmbed is the durable fallback when the page/tab still says "YouTube". Public, no key.
+async function resolveYoutubeTitle(videoId, candidates) {
+  for (const c of candidates) {
+    if (!isGenericYtTitle(c)) {
+      return String(c).replace(/^\(\d+\)\s+/, '').replace(/\s*-\s*YouTube\s*$/i, '').trim();
+    }
+  }
+  if (!videoId) return candidates.find(Boolean) || '';
+  try {
+    const watch = `https://www.youtube.com/watch?v=${videoId}`;
+    const r = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(watch)}&format=json`);
+    if (r.ok) {
+      const j = await r.json();
+      if (j?.title) return String(j.title).trim();
+    }
+  } catch (e) {
+    console.warn('oEmbed title lookup failed', e);
+  }
+  return candidates.find((c) => c && !isGenericYtTitle(c)) || candidates.find(Boolean) || '';
+}
+
 async function getVideoTranscriptAndSummarize(request, tab) {
   const videoId = request.videoId;
   // Build the url FROM the videoId being summarized, not from request.url/tab.url. The tile
@@ -538,7 +565,9 @@ async function getVideoTranscriptAndSummarize(request, tab) {
   const nurl = normUrl(url);
   const model = findModel(request.modelId) || aiConfig.models[0];
   const prompt = request.prompt || model.prompt || aiConfig.defaultPrompt;
-  const title = request.title || tab?.title || '';
+  // Resolve a real title ASAP so the early placeholder + Worker job aren't stored as "YouTube".
+  // Content script → tab.title → oEmbed (last resort, reliable when the SPA hasn't painted yet).
+  let title = await resolveYoutubeTitle(videoId, [request.title, tab?.title]);
 
   // Create + persist a placeholder job right away (before the transcript exists) so the item
   // shows up in history immediately as "generating", and open the panel in a "fetching" state so
@@ -569,6 +598,10 @@ async function getVideoTranscriptAndSummarize(request, tab) {
     // scraped it (the common case — youtube-content.js extracts before messaging), use that.
     const transcript = await fetchTranscript(tab, videoId, request.transcript);
     if (!transcript || !transcript.trim()) throw new Error('Empty transcript');
+    // If the early title was still generic (oEmbed race), try once more before the real job.
+    if (isGenericYtTitle(title)) {
+      title = await resolveYoutubeTitle(videoId, [request.title, tab?.title, title]);
+    }
     // Replaces the placeholder job for this URL with the real one (same key), now with source.
     startSummary({ url, title, sourceText: transcript, isTranscript: true, videoId, tab, modelId: model.id, prompt, noPoster: request.noPoster });
   } catch (error) {

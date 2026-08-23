@@ -43,6 +43,87 @@ function authed(req: Request, env: Env): boolean {
   return !!env.APP_TOKEN && tok === env.APP_TOKEN;
 }
 
+// Preview sizes for the dashboard. Thumbs are 2× the rail card. Fullscreen always
+// fetches the original (no ?s=). `hero` kept so any leftover cached links still work.
+const POSTER_SIZES: Record<string, { width: number; quality: number }> = {
+  // Rail cards are text-dense posters — need enough px + quality to stay legible.
+  // `card` (not `thumb`) so old soft 200px edge-cache entries are abandoned.
+  card: { width: 900, quality: 88 },
+  thumb: { width: 900, quality: 88 }, // alias kept so any old ?s=thumb links still look ok
+  hero: { width: 1600, quality: 86 },
+};
+
+async function servePoster(
+  req: Request,
+  env: Env,
+  ctx: ExecutionContext,
+  origin: string | null,
+): Promise<Response> {
+  const url = new URL(req.url);
+  const key = decodeURIComponent(url.pathname.slice('/poster/'.length));
+  if (!key) return new Response('not found', { status: 404 });
+
+  const size = url.searchParams.get('s') || '';
+  const preset = POSTER_SIZES[size];
+  const cacheHeaders = {
+    'Cache-Control': 'public, max-age=31536000, immutable',
+    ...cors(origin),
+  };
+
+  // Edge-cache resized variants (key includes ?s=). Full originals stream from R2 each
+  // time but browsers still honor Cache-Control on the response.
+  if (preset) {
+    const cache = caches.default;
+    const cacheKey = new Request(url.toString(), { method: 'GET' });
+    const hit = await cache.match(cacheKey);
+    if (hit) {
+      // Re-apply CORS for the current Origin without re-transforming.
+      const headers = new Headers(hit.headers);
+      for (const [k, v] of Object.entries(cors(origin))) headers.set(k, v);
+      return new Response(hit.body, { status: hit.status, headers });
+    }
+
+    const obj = await env.POSTERS.get(key);
+    if (!obj) return new Response('not found', { status: 404 });
+
+    try {
+      const result = await env.IMAGES
+        .input(obj.body)
+        .transform({ width: preset.width, fit: 'scale-down' })
+        .output({ format: 'image/webp', quality: preset.quality });
+      const out = new Response(result.image(), {
+        headers: {
+          'Content-Type': result.contentType(),
+          ...cacheHeaders,
+          'X-Poster-Size': size,
+        },
+      });
+      ctx.waitUntil(cache.put(cacheKey, out.clone()));
+      return out;
+    } catch (e) {
+      // Transform unavailable / bad input → fall through to full original.
+      console.log('poster transform failed', size, String(e));
+      const again = await env.POSTERS.get(key);
+      if (!again) return new Response('not found', { status: 404 });
+      return new Response(again.body, {
+        headers: {
+          'Content-Type': again.httpMetadata?.contentType ?? 'image/png',
+          ...cacheHeaders,
+        },
+      });
+    }
+  }
+
+  const obj = await env.POSTERS.get(key);
+  if (!obj) return new Response('not found', { status: 404 });
+  return new Response(obj.body, {
+    headers: {
+      'Content-Type': obj.httpMetadata?.contentType ?? 'image/png',
+      ...cacheHeaders,
+    },
+  });
+}
+
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
@@ -51,20 +132,10 @@ export default {
 
     if (req.method === 'OPTIONS') return new Response(null, { headers: cors(origin) });
 
-    // Posters are served from R2 as plain images. This is what deletes the sips downscale
-    // hack: that existed only to squeeze a 4K poster under Chrome's ~1MB native-message
-    // cap. Over HTTPS the browser just streams the full-res original.
+    // Posters from R2. Full-res by default; ?s=thumb|hero runs through the Images binding
+    // so the rail/hero don't pull 10–14 MB PNGs. Transformed responses are edge-cached.
     if (p.startsWith('/poster/')) {
-      const key = decodeURIComponent(p.slice('/poster/'.length));
-      const obj = await env.POSTERS.get(key);
-      if (!obj) return new Response('not found', { status: 404 });
-      return new Response(obj.body, {
-        headers: {
-          'Content-Type': obj.httpMetadata?.contentType ?? 'image/jpeg',
-          'Cache-Control': 'public, max-age=31536000, immutable',
-          ...cors(origin),
-        },
-      });
+      return servePoster(req, env, ctx, origin);
     }
 
     if (!p.startsWith('/api/')) return env.ASSETS.fetch(req);

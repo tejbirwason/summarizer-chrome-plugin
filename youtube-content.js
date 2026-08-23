@@ -123,20 +123,51 @@ function createSummaryButton() {
   const quickBtn = makeButton('yt-quick-btn', '⚡', '#2f8f7f', '#26766a');
   quickBtn.title = 'Quick summary — no infographic';
 
+  // Real video title for history/sidebar. document.title often still says "YouTube" on SPA
+  // nav, and the watch-page H1 selector has churned across Polymer / view-model layouts.
+  function watchPageTitle() {
+    const candidates = [
+      document.querySelector('h1.ytd-watch-metadata yt-formatted-string')?.textContent,
+      document.querySelector('ytd-watch-metadata h1 yt-formatted-string')?.textContent,
+      document.querySelector('#title h1 yt-formatted-string')?.textContent,
+      document.querySelector('#title h1')?.textContent,
+      document.querySelector('ytd-watch-metadata h1')?.textContent,
+      document.querySelector('meta[name="title"]')?.getAttribute('content'),
+      document.querySelector('meta[property="og:title"]')?.getAttribute('content'),
+      // ytInitialPlayerResponse is the same blob the player uses — most reliable when present.
+      (() => {
+        try {
+          const m = document.documentElement.innerHTML.match(
+            /ytInitialPlayerResponse\s*=\s*(\{.+?\});\s*(?:var\s+|window\.|<\/script>)/s,
+          );
+          if (m) return JSON.parse(m[1])?.videoDetails?.title;
+        } catch (_) {}
+        return null;
+      })(),
+      document.title,
+    ];
+    for (const raw of candidates) {
+      const t = (raw || '')
+        .replace(/^\(\d+\)\s+/, '')
+        .replace(/\s*-\s*YouTube\s*$/i, '')
+        .trim();
+      // Reject the tab placeholder YouTube paints before the video hydrates.
+      if (t && !/^youtube$/i.test(t)) return t;
+    }
+    return '';
+  }
+
   const runVideoSummary = async (btn, noPoster) => {
     const videoId = new URLSearchParams(window.location.search).get('v');
     if (!videoId) return;
     btn.setLoading(true);
-    // Pass the real video title (+ canonical url) so the summary/history isn't labelled "YouTube".
-    // Prefer the on-page title element — document.title can still read "YouTube" on SPA nav.
-    const title =
-      document.querySelector('h1.ytd-watch-metadata yt-formatted-string, #title h1, ytd-watch-metadata h1')?.textContent?.trim() ||
-      document.title.replace(/^\(\d+\)\s+/, '').replace(/ - YouTube$/, '');
+    const title = watchPageTitle();
 
     // No pre-scraping here. The background fetches the transcript itself: native host
     // (yt-summary.py, ~2s, touches nothing on this page) first, and only if that fails does it
     // message back into this tab for the DOM-panel scrape (yt-transcript.js). Failures surface
     // through the normal summaryError path in the panel, not an alert.
+    // Empty title is fine — background.js oEmbed-resolves it before the job is stored.
     ytSend({ action: 'summarizeVideo', videoId, title, url: window.location.href, noPoster });
   };
 

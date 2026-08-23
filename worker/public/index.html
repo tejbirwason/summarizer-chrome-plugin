@@ -5,21 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Summarizer</title>
 <style>
-  /* Palette mirrors the extension panel's T tokens: dark neutral, teal + amber, no blue. */
+  /* Palette mirrors the extension panel: dark neutral, teal + amber, no blue. */
   :root {
-    --bg: #14110f; --panel: #1d1a17; --panel-2: #262220; --line: #322c28;
+    --bg: #0e0c0b; --panel: #1d1a17; --panel-2: #262220; --line: #322c28;
     --ink: #ece6df; --ink-dim: #a2988d; --ink-faint: #6e655d;
     --teal: #4db6a4; --amber: #d9a441; --red: #c9635b;
-    --sidebar: 340px;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
   body { margin: 0; background: var(--bg); color: var(--ink);
-    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    overflow: hidden; }
 
-  /* Scrollbars. The platform default renders as a pale strip that fights a dark page, so
-     both scroll regions get a thin transparent-track bar. The thumb is inset via a
-     transparent border + background-clip, which is what keeps it from touching the edge. */
   * { scrollbar-width: thin; scrollbar-color: #3d3630 transparent; }
   ::-webkit-scrollbar { width: 11px; height: 11px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -30,22 +27,275 @@
   ::-webkit-scrollbar-thumb:hover { background: #564d45; background-clip: content-box; }
   ::-webkit-scrollbar-corner { background: transparent; }
 
-  /* Reading layout: summary list rails on the LEFT, the chosen summary reads to its right. */
-  .shell { display: grid; grid-template-columns: var(--sidebar) 1fr; height: 100vh; }
+  /* ---------- auth ---------- */
+  .tokenbar { padding: 40px 20px; max-width: 460px; margin: 0 auto; }
+  .tokenbar input { width: 100%; padding: 9px 11px; border-radius: 8px;
+    border: 1px solid var(--line); background: var(--panel); color: var(--ink); font: inherit; }
+  .tokenbar button { margin-top: 10px; padding: 8px 14px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--teal); background: transparent; color: var(--teal); font: inherit; }
 
-  /* ---------- main reading area ---------- */
-  .reader { overflow-y: auto; padding: 0 0 80px; }
-  .reader-inner { max-width: 780px; margin: 0 auto; padding: 0 28px; }
-  .hero { width: 100%; display: block; border-radius: 12px; border: 1px solid var(--line);
-    margin: 28px 0 8px; cursor: zoom-in; background: var(--panel-2); }
-  .hero-cap { color: var(--ink-faint); font-size: 12px; margin: 0 0 26px; text-align: center; }
-  .doc-title { font-size: 28px; line-height: 1.25; margin: 30px 0 10px; font-weight: 650;
-    letter-spacing: -.2px; }
-  .doc-meta { display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
-    font-size: 12px; color: var(--ink-faint); margin-bottom: 8px; }
-  .doc-meta a { color: var(--teal); text-decoration: none; }
+  /* ---------- fullscreen gallery stage ---------- */
+  #app { position: fixed; inset: 0; display: none; }
+  #app.on { display: block; }
 
-  /* Document-style summary body */
+  .stage {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg);
+    overflow: hidden;
+  }
+
+  /* Poster fills most of the viewport; object-fit:contain keeps the full infographic readable. */
+  #stage-img {
+    max-width: min(100vw, 100%);
+    max-height: min(100vh, 100%);
+    width: auto; height: auto;
+    object-fit: contain;
+    display: block;
+    user-select: none;
+    -webkit-user-drag: none;
+    background: transparent;
+  }
+  #stage-img.empty { display: none; }
+
+  .stage-empty {
+    display: none; flex-direction: column; align-items: center; justify-content: center;
+    gap: 10px; color: var(--ink-faint); text-align: center; padding: 24px;
+    max-width: 420px;
+  }
+  .stage-empty.on { display: flex; }
+  .stage-empty h2 { margin: 0; font-size: 16px; color: var(--ink-dim); font-weight: 600; }
+  .stage-empty p { margin: 0; font-size: 13px; line-height: 1.5; }
+
+  /* Edge hit-zones: chrome is invisible until the pointer is near it. */
+  .edge {
+    position: absolute; z-index: 5;
+    /* Zones stay hit-testable even when chrome inside is faded out. */
+  }
+  .edge-left {
+    left: 0; top: 0; bottom: 0; width: 88px;
+    display: flex; align-items: center; justify-content: flex-start;
+    padding-left: 12px;
+  }
+  .edge-right {
+    right: 0; top: 0; bottom: 0; width: 88px;
+    display: flex; align-items: center; justify-content: flex-end;
+    padding-right: 12px;
+  }
+  .edge-top {
+    top: 0; left: 0; right: 0; height: 88px;
+    display: flex; align-items: flex-start; justify-content: space-between;
+    padding: 14px 16px; gap: 12px;
+  }
+  .edge-bottom {
+    bottom: 0; left: 0; right: 0; height: 72px;
+    display: flex; align-items: flex-end; justify-content: center;
+    gap: 14px; padding: 0 16px 18px;
+  }
+
+  /* Fade chrome in only while its edge is hovered (or focused for keyboard). */
+  .edge .fade {
+    opacity: 0;
+    transform: translateY(0);
+    transition: opacity .14s ease, transform .14s ease;
+    pointer-events: none;
+  }
+  .edge-left .fade { transform: translateX(-6px); }
+  .edge-right .fade { transform: translateX(6px); }
+  .edge-top .fade { transform: translateY(-4px); }
+  .edge-bottom .fade { transform: translateY(4px); }
+  .edge:hover .fade,
+  .edge:focus-within .fade,
+  #app.show-chrome .fade {
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
+  }
+  /* Soft gradient only while revealed so it doesn't dim the poster at rest. */
+  .edge-top:hover,
+  .edge-top:focus-within,
+  #app.show-chrome .edge-top {
+    background: linear-gradient(to bottom, rgba(14,12,11,.72), transparent);
+  }
+  .edge-bottom:hover,
+  .edge-bottom:focus-within,
+  #app.show-chrome .edge-bottom {
+    background: linear-gradient(to top, rgba(14,12,11,.7), transparent);
+  }
+
+  .title-chip {
+    min-width: 0; max-width: min(70vw, 640px);
+  }
+  .title-chip .t {
+    font-size: 13px; font-weight: 600; line-height: 1.35; color: var(--ink);
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    text-shadow: 0 1px 8px rgba(0,0,0,.55);
+  }
+  .title-chip .m {
+    margin-top: 3px; font-size: 11px; color: var(--ink-dim);
+    text-shadow: 0 1px 6px rgba(0,0,0,.5);
+  }
+
+  .top-actions { display: flex; gap: 8px; flex-shrink: 0; align-items: center; }
+
+  .icon-btn {
+    position: relative;
+    width: 40px; height: 40px; border-radius: 999px;
+    border: 1px solid rgba(50,44,40,.85);
+    background: rgba(29,26,23,.72);
+    color: var(--ink);
+    display: inline-flex; align-items: center; justify-content: center;
+    cursor: pointer; backdrop-filter: blur(8px);
+    transition: background .12s, border-color .12s, color .12s;
+    padding: 0;
+  }
+  .icon-btn:hover { background: rgba(38,34,32,.92); border-color: var(--teal); color: var(--teal); }
+  .icon-btn:active { transform: scale(.97); }
+  .icon-btn svg { width: 18px; height: 18px; display: block; }
+  .icon-btn.primary { border-color: rgba(77,182,164,.45); color: var(--teal); }
+  .icon-btn.primary:hover { background: rgba(77,182,164,.14); }
+
+  /* Unread count — only visible while top edge (list icon) is hovered. */
+  .unread-badge {
+    position: absolute; top: -5px; right: -6px;
+    min-width: 18px; height: 18px; padding: 0 5px;
+    border-radius: 999px;
+    background: var(--teal); color: #0e0c0b;
+    font-size: 10.5px; font-weight: 700; line-height: 18px;
+    text-align: center; letter-spacing: -.02em;
+    font-variant-numeric: tabular-nums;
+    box-shadow: 0 1px 4px rgba(0,0,0,.35);
+    display: none;
+  }
+  .unread-badge.on { display: block; }
+
+  .nav-btn {
+    width: 48px; height: 72px; border-radius: 12px;
+    border: 1px solid rgba(50,44,40,.85);
+    background: rgba(29,26,23,.55);
+    color: var(--ink);
+    display: inline-flex; align-items: center; justify-content: center;
+    cursor: pointer; backdrop-filter: blur(8px);
+    transition: background .12s, border-color .12s;
+    padding: 0;
+  }
+  .nav-btn:hover { background: rgba(38,34,32,.88); border-color: var(--teal); color: var(--teal); }
+  .nav-btn:disabled { opacity: .3; cursor: default; }
+  .nav-btn svg { width: 22px; height: 22px; }
+
+  .counter {
+    font-size: 12px; color: var(--ink-dim); letter-spacing: .02em;
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 1px 6px rgba(0,0,0,.5);
+  }
+  .hint {
+    font-size: 11px; color: var(--ink-faint);
+    text-shadow: 0 1px 6px rgba(0,0,0,.5);
+  }
+  @media (max-width: 640px) {
+    .hint { display: none; }
+    .nav-btn { width: 40px; height: 56px; }
+    .edge-left, .edge-right { width: 64px; }
+    .edge-top { height: 76px; }
+  }
+
+  /* Touch: no hover — flash chrome briefly after a tap near edges is handled in JS via .show-chrome. */
+  @media (hover: none) {
+    .edge .fade { opacity: 0; }
+  }
+
+  /* ---------- browse drawer (list / search) ---------- */
+  #drawer {
+    position: fixed; inset: 0; z-index: 30; display: none;
+  }
+  #drawer.open { display: block; }
+  .drawer-bg {
+    position: absolute; inset: 0; background: rgba(0,0,0,.55);
+  }
+  .drawer-panel {
+    position: absolute; top: 0; left: 0; bottom: 0; width: min(360px, 92vw);
+    background: var(--panel); border-right: 1px solid var(--line);
+    display: flex; flex-direction: column; min-height: 0;
+    box-shadow: 8px 0 40px rgba(0,0,0,.4);
+    animation: slideIn .16s ease-out;
+  }
+  @keyframes slideIn {
+    from { transform: translateX(-12px); opacity: .6; }
+    to { transform: translateX(0); opacity: 1; }
+  }
+  .drawer-head { padding: 14px 14px 10px; border-bottom: 1px solid var(--line); }
+  .drawer-head h1 { font-size: 14px; margin: 0 0 9px; font-weight: 650; display: flex; gap: 8px; }
+  .drawer-head .n { color: var(--ink-faint); font-weight: 400; }
+  #q { width: 100%; padding: 7px 10px; border-radius: 7px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--ink); font: inherit; font-size: 13px; }
+  .drawer-list { overflow-y: auto; flex: 1; padding: 6px; }
+  .drawer-foot { border-top: 1px solid var(--line); padding: 7px 12px; font-size: 11px;
+    color: var(--ink-faint); display: flex; justify-content: space-between; }
+
+  .day-head { position: sticky; top: 0; z-index: 2; padding: 8px 10px 4px;
+    font-size: 10.5px; font-weight: 620; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--ink-faint); background: var(--panel);
+    border-bottom: 1px solid var(--line); margin: 4px 0 2px; }
+  .day-head:first-child { margin-top: 0; }
+
+  .item { display: flex; flex-direction: column; gap: 8px; padding: 8px; border-radius: 10px;
+    cursor: pointer; border: 1px solid transparent; position: relative; }
+  .item.no-thumb { gap: 0; padding: 10px 10px; }
+  .item:hover { background: var(--panel-2); }
+  .item.sel { background: var(--panel-2); border-color: var(--teal); }
+  .item.unread .item-title { color: var(--ink); font-weight: 620; }
+  .item.unread::after {
+    content: ''; position: absolute; top: 12px; right: 12px;
+    width: 7px; height: 7px; border-radius: 50%; background: var(--teal);
+    box-shadow: 0 0 0 2px var(--panel);
+  }
+  .item-thumb { width: 100%; aspect-ratio: 16 / 9; height: auto; border-radius: 7px;
+    object-fit: contain; display: block; background: var(--bg); border: 1px solid var(--line); }
+  .item-thumb.empty { display: flex; align-items: center; justify-content: center;
+    font-size: 18px; color: var(--ink-faint); min-height: 0; }
+  .item-body { min-width: 0; width: 100%; }
+  .item-title { font-size: 12.5px; line-height: 1.35; margin: 0 0 3px; color: var(--ink);
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .item-meta { font-size: 10.5px; color: var(--ink-faint); display: flex; gap: 6px; flex-wrap: wrap; }
+  .dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor;
+    display: inline-block; margin-right: 4px; animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .25 } }
+  .tag { border-radius: 999px; padding: 0 6px; border: 1px solid var(--line); }
+  .tag.streaming { color: var(--teal); border-color: var(--teal); }
+  .tag.generating { color: var(--amber); border-color: var(--amber); }
+  .tag.error { color: var(--red); border-color: var(--red); }
+
+  /* ---------- detail overlay: video + summary ---------- */
+  #detail {
+    position: fixed; inset: 0; z-index: 40; display: none;
+    background: rgba(8,7,6,.88); backdrop-filter: blur(10px);
+  }
+  #detail.open { display: block; }
+  .detail-shell {
+    position: absolute; inset: 0;
+    display: grid; grid-template-rows: auto 1fr;
+    max-width: 860px; width: 100%; margin: 0 auto;
+  }
+  .detail-head {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 12px; padding: 16px 18px 10px;
+  }
+  .detail-head h2 {
+    margin: 0; font-size: 18px; line-height: 1.3; font-weight: 650;
+    letter-spacing: -.2px; min-width: 0;
+  }
+  .detail-meta {
+    display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+    font-size: 12px; color: var(--ink-faint); margin-top: 6px;
+  }
+  .detail-meta a { color: var(--teal); text-decoration: none; }
+  .detail-body {
+    overflow-y: auto; padding: 0 18px 48px; min-height: 0;
+  }
+  .video { position: relative; width: 100%; aspect-ratio: 16 / 9; margin: 6px 0 22px;
+    border-radius: 10px; overflow: hidden; border: 1px solid var(--line); background: #000; }
+  .video iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+
   .doc { font-size: 16px; }
   .doc h1, .doc h2 { font-size: 17px; margin: 28px 0 8px; letter-spacing: .01em; }
   .doc h3 { font-size: 15px; margin: 22px 0 6px; color: var(--ink-dim); }
@@ -67,7 +317,6 @@
     font-size: 12px; letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
   .doc tbody tr:nth-child(even) { background: rgba(255,255,255,.017); }
   .doc tbody td { color: #ded6cd; }
-  /* Wide tables scroll inside their own box — the page body must never scroll sideways. */
   .table-wrap { overflow-x: auto; margin: 0 0 18px; border-radius: 8px;
     border: 1px solid var(--line); }
   .table-wrap table { border: none; }
@@ -76,63 +325,13 @@
   .table-wrap thead th { border-top: none; }
   .table-wrap tbody tr:last-child td { border-bottom: none; }
 
-  /* 16:9 embed of the source video */
-  .video { position: relative; width: 100%; aspect-ratio: 16 / 9; margin: 18px 0 26px;
-    border-radius: 10px; overflow: hidden; border: 1px solid var(--line); background: #000; }
-  .video iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
-
-  .placeholder { color: var(--ink-faint); text-align: center; padding-top: 34vh; }
-  .placeholder h2 { font-size: 15px; color: var(--ink-dim); margin: 0 0 6px; }
-
-  /* ---------- left rail ---------- */
-  .rail { border-right: 1px solid var(--line); background: var(--panel);
-    display: flex; flex-direction: column; min-height: 0; }
-  .rail-head { padding: 14px 14px 10px; border-bottom: 1px solid var(--line); }
-  .rail-head h1 { font-size: 14px; margin: 0 0 9px; font-weight: 650; display: flex; gap: 8px; }
-  .rail-head .n { color: var(--ink-faint); font-weight: 400; }
-  #q { width: 100%; padding: 7px 10px; border-radius: 7px; border: 1px solid var(--line);
-    background: var(--bg); color: var(--ink); font: inherit; font-size: 13px; }
-  .rail-list { overflow-y: auto; flex: 1; padding: 6px; }
-
-  .item { display: flex; gap: 10px; padding: 8px; border-radius: 8px; cursor: pointer;
-    border: 1px solid transparent; }
-  .item:hover { background: var(--panel-2); }
-  .item.sel { background: var(--panel-2); border-color: var(--teal); }
-  .item-thumb { width: 68px; height: 38px; border-radius: 4px; object-fit: cover; flex: none;
-    background: var(--bg); border: 1px solid var(--line); }
-  .item-thumb.empty { display: flex; align-items: center; justify-content: center;
-    font-size: 14px; color: var(--ink-faint); }
-  .item-body { min-width: 0; flex: 1; }
-  .item-title { font-size: 12.5px; line-height: 1.35; margin: 0 0 3px; color: var(--ink);
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .item-meta { font-size: 10.5px; color: var(--ink-faint); display: flex; gap: 6px; flex-wrap: wrap; }
-  .dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor;
-    display: inline-block; margin-right: 4px; animation: pulse 1.2s ease-in-out infinite; }
-  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .25 } }
-  .tag { border-radius: 999px; padding: 0 6px; border: 1px solid var(--line); }
-  .tag.streaming { color: var(--teal); border-color: var(--teal); }
-  .tag.generating { color: var(--amber); border-color: var(--amber); }
-  .tag.error { color: var(--red); border-color: var(--red); }
-  .rail-foot { border-top: 1px solid var(--line); padding: 7px 12px; font-size: 11px;
-    color: var(--ink-faint); display: flex; justify-content: space-between; }
-  .del { background: none; border: none; color: var(--ink-faint); cursor: pointer; font-size: 11px; }
-  .del:hover { color: var(--red); }
-
-  #lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.93); display: none;
-    align-items: center; justify-content: center; z-index: 50; cursor: zoom-out; padding: 18px; }
-  #lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; }
-
-  .tokenbar { padding: 40px 20px; max-width: 460px; margin: 0 auto; }
-  .tokenbar input { width: 100%; padding: 9px 11px; border-radius: 8px;
-    border: 1px solid var(--line); background: var(--panel); color: var(--ink); font: inherit; }
-  .tokenbar button { margin-top: 10px; padding: 8px 14px; border-radius: 8px; cursor: pointer;
-    border: 1px solid var(--teal); background: transparent; color: var(--teal); font: inherit; }
-
-  @media (max-width: 900px) {
-    /* Stacked: the list is the nav, so it sits on top and the reader takes the rest. */
-    .shell { grid-template-columns: 1fr; grid-template-rows: 40vh 1fr; }
-    .rail { border-right: none; border-bottom: 1px solid var(--line); }
-  }
+  #toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%) translateY(12px);
+    background: var(--panel-2); color: var(--ink); border: 1px solid var(--line);
+    padding: 8px 14px; border-radius: 999px; font-size: 12px; z-index: 80;
+    opacity: 0; pointer-events: none; transition: opacity .15s, transform .15s;
+    box-shadow: 0 8px 24px rgba(0,0,0,.35); max-width: min(90vw, 420px);
+    text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 </style>
 </head>
 <body>
@@ -143,36 +342,180 @@
   <button id="save">Unlock</button>
 </div>
 
-<div class="shell" id="app" hidden>
-  <aside class="rail">
-    <div class="rail-head">
-      <h1>Summarizer <span class="n" id="count"></span></h1>
-      <input id="q" type="search" placeholder="Filter by title…" autocomplete="off" />
+<div id="app">
+  <div class="stage" id="stage">
+    <img id="stage-img" alt="" draggable="false" />
+    <div class="stage-empty" id="stage-empty">
+      <h2 id="empty-title">No image yet</h2>
+      <p id="empty-body">Open the summary to read the transcript, or step to another post.</p>
     </div>
-    <div class="rail-list" id="list"></div>
-    <div class="rail-foot"><span id="tick"></span><span id="live-n"></span></div>
-  </aside>
-  <div class="reader" id="reader">
-    <div class="reader-inner" id="reader-inner">
-      <div class="placeholder"><h2>Pick a summary</h2><p>The poster reads as the hero, the summary sits underneath.</p></div>
+  </div>
+
+  <div class="edge edge-top">
+    <div class="title-chip fade">
+      <div class="t" id="stage-title"></div>
+      <div class="m" id="stage-meta"></div>
     </div>
+    <div class="top-actions fade">
+      <button class="icon-btn" id="btn-list" title="Browse all (L)" aria-label="Browse all summaries">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+          <path d="M4 7h16M4 12h16M4 17h10"/>
+        </svg>
+        <span class="unread-badge" id="unread-badge" aria-hidden="true"></span>
+      </button>
+      <button class="icon-btn primary" id="btn-detail" title="Video + summary (I / Space)" aria-label="Open video and summary">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9"/>
+          <path d="M12 10.5v6M12 7.5h.01"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <div class="edge edge-left">
+    <button class="nav-btn fade" id="btn-prev" title="Previous (←)" aria-label="Previous summary">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M15 6l-6 6 6 6"/>
+      </svg>
+    </button>
+  </div>
+  <div class="edge edge-right">
+    <button class="nav-btn fade" id="btn-next" title="Next (→)" aria-label="Next summary">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 6l6 6-6 6"/>
+      </svg>
+    </button>
+  </div>
+
+  <div class="edge edge-bottom">
+    <span class="counter fade" id="counter"></span>
+    <span class="hint fade">← → navigate · I summary</span>
   </div>
 </div>
 
-<div id="lightbox"><img id="lightbox-img" alt="" /></div>
+<!-- Browse drawer -->
+<div id="drawer" aria-hidden="true">
+  <div class="drawer-bg" id="drawer-bg"></div>
+  <aside class="drawer-panel" role="dialog" aria-label="All summaries">
+    <div class="drawer-head">
+      <h1>Summarizer <span class="n" id="count"></span></h1>
+      <input id="q" type="search" placeholder="Filter by title…" autocomplete="off" />
+    </div>
+    <div class="drawer-list" id="list"></div>
+    <div class="drawer-foot"><span id="tick"></span><span id="live-n"></span></div>
+  </aside>
+</div>
+
+<!-- Detail overlay: video + summary text -->
+<div id="detail" aria-modal="true" role="dialog" aria-label="Video and summary">
+  <div class="detail-shell">
+    <div class="detail-head">
+      <div style="min-width:0">
+        <h2 id="detail-title"></h2>
+        <div class="detail-meta" id="detail-meta"></div>
+      </div>
+      <button class="icon-btn" id="btn-detail-close" title="Close (Esc)" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+          <path d="M7 7l10 10M17 7L7 17"/>
+        </svg>
+      </button>
+    </div>
+    <div class="detail-body" id="detail-body"></div>
+  </div>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
 
 <script>
 const $ = (s) => document.querySelector(s);
 let TOKEN = localStorage.getItem('summarizer_token') || new URLSearchParams(location.search).get('token');
 if (TOKEN) localStorage.setItem('summarizer_token', TOKEN);
 
+const LAST_KEY = 'summarizer_last_id';
+// Read-set: ids the user has opened. First boot seeds every current id so the
+// existing archive doesn't light up as "unread" — only summaries that appear
+// after that (or that you haven't opened since) count.
+const READ_KEY = 'summarizer_read_ids';
+const READ_SEEDED = 'summarizer_read_seeded';
+
 let ALL = [];
 let selId = null;
 let filter = '';
+// Last opened summary (incl. full transcript) — source for the `c` copy hotkey.
+let current = null;
+let toastTimer = 0;
+let detailOpen = false;
+let drawerOpen = false;
+let readIds = loadReadIds();
+let chromeHideTimer = 0;
+
+function loadReadIds() {
+  try {
+    const raw = localStorage.getItem(READ_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    return new Set(Array.isArray(arr) ? arr : []);
+  } catch { return new Set(); }
+}
+
+function saveReadIds() {
+  try {
+    // Cap so a multi-year archive doesn't blow localStorage. Keep most recent ~4k.
+    const arr = [...readIds];
+    if (arr.length > 4000) arr.splice(0, arr.length - 4000);
+    localStorage.setItem(READ_KEY, JSON.stringify(arr));
+  } catch {}
+}
+
+function isRead(id) {
+  return !!id && readIds.has(id);
+}
+
+function markRead(id) {
+  if (!id || readIds.has(id)) return;
+  readIds.add(id);
+  saveReadIds();
+  updateUnreadBadge();
+}
+
+// On first ever visit after this feature ships: treat everything already in the
+// list as read so only *new* summaries after that become unread.
+function seedReadIfNeeded() {
+  try {
+    if (localStorage.getItem(READ_SEEDED)) return;
+    for (const s of ALL) if (s.id) readIds.add(s.id);
+    saveReadIds();
+    localStorage.setItem(READ_SEEDED, '1');
+  } catch {}
+}
+
+function unreadCount() {
+  let n = 0;
+  for (const s of ALL) if (s.id && !readIds.has(s.id)) n++;
+  return n;
+}
+
+function updateUnreadBadge() {
+  const el = $('#unread-badge');
+  if (!el) return;
+  const n = unreadCount();
+  if (n <= 0) {
+    el.classList.remove('on');
+    el.textContent = '';
+    el.setAttribute('aria-hidden', 'true');
+    $('#btn-list')?.removeAttribute('data-unread');
+  } else {
+    el.classList.add('on');
+    el.textContent = n > 99 ? '99+' : String(n);
+    el.setAttribute('aria-hidden', 'false');
+    $('#btn-list')?.setAttribute('data-unread', String(n));
+    $('#btn-list').title = `Browse all (L) · ${n} unread`;
+  }
+}
 
 // Deep link: the extension opens /?token=…#s=<encoded summary id> to jump straight to one
 // summary. Capture it before the token gets scrubbed from the address bar. Cleared once used
-// so the 4s rail refresh never yanks the reader back to it.
+// so the 4s rail refresh never yanks the viewer back to it.
 function readHashId() {
   const m = /[#&]s=([^&]+)/.exec(location.hash || '');
   try { return m ? decodeURIComponent(m[1]) : null; } catch { return null; }
@@ -188,6 +531,34 @@ const ago = (ms) => {
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
   return `${Math.floor(s / 86400)}d ago`;
+};
+
+const dayKey = (ms) => {
+  const d = new Date(ms || 0);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+const dayLabel = (key) => {
+  if (!key || key === '0-00-00') return 'Unknown';
+  const [y, m, d] = key.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const that = new Date(y, m - 1, d);
+  const diffDays = Math.round((today - that) / 86400000);
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays > 1 && diffDays < 7) {
+    return date.toLocaleDateString(undefined, { weekday: 'long' });
+  }
+  const sameYear = date.getFullYear() === today.getFullYear();
+  return date.toLocaleDateString(undefined, {
+    weekday: 'short', month: 'short', day: 'numeric',
+    ...(sameYear ? {} : { year: 'numeric' }),
+  });
 };
 
 async function api(path, opts = {}) {
@@ -215,8 +586,6 @@ function md(src) {
     .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
   const closeList = () => { if (inList) { out += `</${listTag}>`; inList = false; } };
 
-  // A pipe row is only a table if the NEXT line is a |---|---| separator — which is exactly
-  // why the old line-at-a-time loop couldn't do this and fell back to printing the pipes.
   const isRow = (l) => l !== undefined && /\|/.test(l) && /^\s*\|?[^|]*\|/.test(l.trim());
   const isSep = (l) => l !== undefined && /-/.test(l) && /\|/.test(l) && /^[\s|:-]+$/.test(l.trim());
   const cells = (l) => {
@@ -239,7 +608,6 @@ function md(src) {
     if (inCode) { out += line + '\n'; continue; }
     if (!line.trim()) { closeList(); continue; }
 
-    // --- table ---
     if (isRow(line) && isSep(lines[i + 1])) {
       closeList();
       const head = cells(line);
@@ -278,71 +646,176 @@ function md(src) {
   return out;
 }
 
+const posterUrl = (key, size) =>
+  `/poster/${encodeURIComponent(key)}${size ? `?s=${size}` : ''}`;
+
+const fullPreload = new Set();
+function preloadFull(key) {
+  if (!key || fullPreload.has(key)) return;
+  fullPreload.add(key);
+  const img = new Image();
+  img.decoding = 'async';
+  img.src = posterUrl(key);
+}
+
+function filteredRows() {
+  const f = filter.toLowerCase();
+  return f ? ALL.filter((s) => (s.title || s.url).toLowerCase().includes(f)) : ALL;
+}
+
+function rememberLast(id) {
+  if (!id) return;
+  try { localStorage.setItem(LAST_KEY, id); } catch {}
+}
+
+function readLast() {
+  try { return localStorage.getItem(LAST_KEY); } catch { return null; }
+}
+
 function railItem(s) {
   const streaming = s.gen_state === 'streaming';
   const posterGen = s.poster_state === 'generating' || s.poster_state === 'queued';
+  const unread = !isRead(s.id);
   const thumb = s.poster_key
-    ? `<img class="item-thumb" src="/poster/${encodeURIComponent(s.poster_key)}" loading="lazy" alt="" />`
-    : `<div class="item-thumb empty">${posterGen ? '◴' : '—'}</div>`;
+    ? `<img class="item-thumb" src="${posterUrl(s.poster_key, 'card')}" loading="lazy" decoding="async" alt="" data-full="${esc(s.poster_key)}" />`
+    : posterGen
+      ? `<div class="item-thumb empty">◴</div>`
+      : '';
   const tags = [];
+  if (unread) tags.push('<span class="tag streaming">unread</span>');
   if (streaming) tags.push('<span class="tag streaming"><span class="dot"></span>summarizing</span>');
   if (posterGen) tags.push('<span class="tag generating"><span class="dot"></span>image</span>');
   if (s.gen_state === 'error') tags.push('<span class="tag error">failed</span>');
   if (!s.model_id) tags.push('<span class="tag">no summary</span>');
-  return `<div class="item ${s.id === selId ? 'sel' : ''}" data-id="${esc(s.id)}">
+  return `<div class="item ${s.id === selId ? 'sel' : ''}${unread ? ' unread' : ''}${thumb ? '' : ' no-thumb'}" data-id="${esc(s.id)}">
     ${thumb}
     <div class="item-body">
       <p class="item-title">${esc(s.title || s.url)}</p>
-      <div class="item-meta">${tags.join('')}<span>${esc(s.model_icon || '')} ${esc(s.model_name || '')}</span><span>${ago(s.updated_at)}</span></div>
+      <div class="item-meta">${tags.join('')}<span>${ago(s.updated_at)}</span></div>
     </div>
   </div>`;
 }
 
 function renderRail() {
-  const f = filter.toLowerCase();
-  const rows = f ? ALL.filter((s) => (s.title || s.url).toLowerCase().includes(f)) : ALL;
-  $('#list').innerHTML = rows.length ? rows.map(railItem).join('')
-    : '<p style="color:var(--ink-faint);font-size:12px;padding:14px">No matches.</p>';
-  $('#count').textContent = f ? `${rows.length}/${ALL.length}` : ALL.length;
+  const rows = filteredRows();
+  if (!rows.length) {
+    $('#list').innerHTML = '<p style="color:var(--ink-faint);font-size:12px;padding:14px">No matches.</p>';
+  } else {
+    let html = '';
+    let lastKey = null;
+    for (const s of rows) {
+      const k = dayKey(s.updated_at);
+      if (k !== lastKey) {
+        html += `<div class="day-head">${esc(dayLabel(k))}</div>`;
+        lastKey = k;
+      }
+      html += railItem(s);
+    }
+    $('#list').innerHTML = html;
+  }
+  const unread = unreadCount();
+  const base = filter ? `${rows.length}/${ALL.length}` : String(ALL.length);
+  $('#count').textContent = unread ? `${base} · ${unread} unread` : base;
   const live = ALL.filter((s) => s.gen_state === 'streaming' || s.poster_state === 'generating').length;
   $('#live-n').textContent = live ? `${live} running` : '';
   $('#tick').textContent = new Date().toLocaleTimeString();
+  updateCounter();
+  updateUnreadBadge();
 }
 
-async function open(id) {
-  selId = id;
-  renderRail();
-  // Keep the address bar pointing at the open summary so it stays a shareable deep link.
-  history.replaceState({}, '', location.pathname + `#s=${encodeURIComponent(id)}`);
-  // Bring the selected rail row into view (it may be far down a long list, or off-screen
-  // entirely when arrived at via deep link).
-  const selEl = [...document.querySelectorAll('.item')].find((el) => el.dataset.id === id);
-  if (selEl) selEl.scrollIntoView({ block: 'nearest' });
-  const { summary, generations = [], poster } = await api(`/api/summary/${encodeURIComponent(id)}`);
-  if (!summary) return;
-  // Prefer a real generation over an imported one when a page has both.
-  const gen = generations.find((g) => g.model_id !== 'imported') || generations[0];
-  const key = poster?.r2_key;
+function updateCounter() {
+  const rows = filteredRows();
+  const i = rows.findIndex((s) => s.id === selId);
+  if (!rows.length) {
+    $('#counter').textContent = '';
+  } else if (i < 0) {
+    $('#counter').textContent = `${rows.length}`;
+  } else {
+    $('#counter').textContent = `${i + 1} / ${rows.length}`;
+  }
+  // Disable arrows only when there's nothing to step to.
+  const one = rows.length <= 1;
+  $('#btn-prev').disabled = one;
+  $('#btn-next').disabled = one;
+}
 
+function toast(msg) {
+  const el = $('#toast');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 1800);
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.cssText = 'position:fixed;left:-9999px;top:0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      ta.remove();
+      return ok;
+    } catch { return false; }
+  }
+}
+
+async function copyTranscript() {
+  if (!current) { toast('Nothing open to copy'); return; }
+  const body = (current.transcript || '').trim();
+  if (!body) { toast('No transcript for this summary'); return; }
+  const title = current.title || current.url || 'Transcript';
+  const url = current.url || '';
+  const text = `# ${title}\n${url ? `URL: ${url}\n` : ''}\n${body}\n`;
+  const ok = await copyText(text);
+  if (ok) {
+    const k = Math.round(body.length / 1000);
+    toast(k > 0 ? `Transcript copied (${k}k chars)` : `Transcript copied (${body.length} chars)`);
+  } else {
+    toast('Copy failed — clipboard blocked');
+  }
+}
+
+function setStageImage(key, title) {
+  const img = $('#stage-img');
+  const empty = $('#stage-empty');
+  if (key) {
+    img.classList.remove('empty');
+    img.alt = title || '';
+    img.dataset.full = key;
+    img.src = posterUrl(key);
+    empty.classList.remove('on');
+    preloadFull(key);
+  } else {
+    img.classList.add('empty');
+    img.removeAttribute('src');
+    img.removeAttribute('data-full');
+    empty.classList.add('on');
+  }
+}
+
+function paintDetail(summary, generations, poster) {
+  const gen = generations.find((g) => g.model_id !== 'imported') || generations[0];
   // Derive the embed id from the summary's OWN url, NOT the separate video_id column.
-  // video_id was observed getting polluted by the tab the user summarized FROM, so trusting
-  // it embedded the wrong video. The url is keyed to the summary itself; only embed when it
-  // actually carries a watch id. youtube-nocookie keeps the reader from seeding tracking
-  // cookies just by being open.
   const vm = /[?&]v=([A-Za-z0-9_-]{11})/.exec(summary.url || summary.id || '');
   const vid = vm ? vm[1] : null;
 
-  $('#reader-inner').innerHTML = `
-    ${key ? `<img class="hero" id="hero" src="/poster/${encodeURIComponent(key)}" alt="" />
-             <p class="hero-cap">Click to view full resolution</p>` : ''}
-    <h1 class="doc-title">${esc(summary.title || summary.url)}</h1>
-    <div class="doc-meta">
-      ${gen ? `<span>${esc(gen.model_icon || '')} ${esc(gen.model_name || '')}</span>` : '<span>no summary yet</span>'}
-      ${gen?.duration_ms ? `<span>· ${(gen.duration_ms / 1000).toFixed(1)}s</span>` : ''}
-      <span>· ${ago(summary.updated_at)}</span>
-      <span>· <a href="${esc(summary.url)}" target="_blank" rel="noreferrer">watch ↗</a></span>
-      ${summary.transcript ? `<span>· ${(summary.transcript.length / 1000).toFixed(0)}k transcript</span>` : ''}
-    </div>
+  $('#detail-title').textContent = summary.title || summary.url || '';
+  $('#detail-meta').innerHTML = `
+    ${gen ? `<span>${esc(gen.model_icon || '')} ${esc(gen.model_name || '')}</span>` : '<span>no summary yet</span>'}
+    ${gen?.duration_ms ? `<span>· ${(gen.duration_ms / 1000).toFixed(1)}s</span>` : ''}
+    <span>· ${ago(summary.updated_at)}</span>
+    <span>· <a href="${esc(summary.url)}" target="_blank" rel="noreferrer">watch ↗</a></span>
+    ${summary.transcript ? `<span>· ${(summary.transcript.length / 1000).toFixed(0)}k transcript</span>` : ''}
+  `;
+
+  $('#detail-body').innerHTML = `
     ${vid ? `<div class="video"><iframe src="https://www.youtube-nocookie.com/embed/${vid}"
         title="${esc(summary.title || '')}" loading="lazy" allowfullscreen
         allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -350,28 +823,256 @@ async function open(id) {
     <div class="doc">${gen?.content
       ? md(gen.content)
       : '<p style="color:var(--ink-faint)">Transcript imported, but no summary was generated for this one yet.</p>'}</div>`;
-  $('#reader').scrollTop = 0;
+}
+
+async function open(id) {
+  if (!id) return;
+  selId = id;
+  rememberLast(id);
+  markRead(id);
+  renderRail();
+  history.replaceState({}, '', location.pathname + `#s=${encodeURIComponent(id)}`);
+
+  // Keep drawer selection visible if open.
+  if (drawerOpen) {
+    const selEl = [...document.querySelectorAll('.item')].find((el) => el.dataset.id === id);
+    if (selEl) selEl.scrollIntoView({ block: 'nearest' });
+  }
+
+  // Optimistic stage paint from the list row (avoids blank while /api/summary loads).
+  const listRow = ALL.find((s) => s.id === id);
+  if (listRow) {
+    $('#stage-title').textContent = listRow.title || listRow.url || '';
+    $('#stage-meta').textContent = ago(listRow.updated_at);
+    setStageImage(listRow.poster_key, listRow.title);
+    if (!listRow.poster_key) {
+      const posterGen = listRow.poster_state === 'generating' || listRow.poster_state === 'queued';
+      $('#empty-title').textContent = posterGen ? 'Generating image…' : 'No image yet';
+      $('#empty-body').textContent = posterGen
+        ? 'The infographic is still rendering. Tap the info icon for the summary.'
+        : 'Open the summary to read the transcript, or step to another post.';
+    }
+  }
+
+  const { summary, generations = [], poster } = await api(`/api/summary/${encodeURIComponent(id)}`);
+  // Stale response after a fast arrow-key step — ignore.
+  if (selId !== id) return;
+  if (!summary) return;
+  current = summary;
+
+  const key = poster?.r2_key || summary.poster_key || listRow?.poster_key;
+  $('#stage-title').textContent = summary.title || summary.url || '';
+  $('#stage-meta').textContent = ago(summary.updated_at);
+  setStageImage(key, summary.title);
+  preloadNeighbors();
+
+  // Keep detail overlay content in sync if it's open (or pre-paint for instant open).
+  paintDetail(summary, generations, poster);
+  if (detailOpen) {
+    // Scroll detail to top only when the open item actually changed.
+    $('#detail-body').scrollTop = 0;
+  }
+}
+
+function openDetail() {
+  if (!current && !selId) return;
+  detailOpen = true;
+  $('#detail').classList.add('open');
+  // Restore embed if closeDetail blanked it to stop playback.
+  const iframe = $('#detail-body iframe');
+  if (iframe?.dataset?.src && !iframe.getAttribute('src')) {
+    iframe.src = iframe.dataset.src;
+  }
+  $('#detail-body').scrollTop = 0;
+}
+
+function closeDetail() {
+  if (!detailOpen) return;
+  detailOpen = false;
+  $('#detail').classList.remove('open');
+  // Blank the iframe so YouTube stops playing; keep src so re-open is instant.
+  const iframe = $('#detail-body iframe');
+  if (iframe?.src) {
+    iframe.dataset.src = iframe.src;
+    iframe.removeAttribute('src');
+  }
+}
+
+function openDrawer() {
+  drawerOpen = true;
+  $('#drawer').classList.add('open');
+  $('#drawer').setAttribute('aria-hidden', 'false');
+  renderRail();
+  setTimeout(() => $('#q').focus(), 30);
+}
+
+function closeDrawer() {
+  if (!drawerOpen) return;
+  drawerOpen = false;
+  $('#drawer').classList.remove('open');
+  $('#drawer').setAttribute('aria-hidden', 'true');
 }
 
 async function refresh() {
   const { summaries = [] } = await api('/api/summaries');
   ALL = summaries;
+  seedReadIfNeeded();
   renderRail();
   if (!selId) {
-    if (deepLinkId) { const want = deepLinkId; deepLinkId = null; open(want); }
-    else if (ALL.length) open(ALL[0].id);
+    if (deepLinkId) {
+      const want = deepLinkId;
+      deepLinkId = null;
+      if (ALL.some((s) => s.id === want)) { open(want); return; }
+    }
+    const last = readLast();
+    if (last && ALL.some((s) => s.id === last)) { open(last); return; }
+    if (ALL.length) open(ALL[0].id);
+  } else {
+    // Soft-update stage if the selected row's poster just landed.
+    const row = ALL.find((s) => s.id === selId);
+    if (row?.poster_key) {
+      const img = $('#stage-img');
+      if (img.classList.contains('empty') || img.dataset.full !== row.poster_key) {
+        setStageImage(row.poster_key, row.title);
+      }
+    }
   }
 }
 
+function preloadNeighbors() {
+  const rows = filteredRows();
+  const i = rows.findIndex((s) => s.id === selId);
+  if (i < 0) return;
+  for (const s of [rows[i - 1], rows[i + 1]]) {
+    if (s?.poster_key) preloadFull(s.poster_key);
+  }
+}
+
+// dir: -1 prev (newer, further up). +1 next (older, further down). List is newest-first.
+async function stepPost(dir) {
+  const rows = filteredRows();
+  if (!rows.length) return;
+  let i = rows.findIndex((s) => s.id === selId);
+  if (i < 0) i = 0;
+  const next = rows[(i + dir + rows.length) % rows.length];
+  if (!next || next.id === selId) return;
+  await open(next.id);
+}
+
+// ---------- events ----------
 $('#list').addEventListener('click', (e) => {
   const it = e.target.closest('.item');
-  if (it) open(it.dataset.id);
+  if (it) {
+    open(it.dataset.id);
+    closeDrawer();
+  }
 });
 $('#q').addEventListener('input', (e) => { filter = e.target.value; renderRail(); });
-document.addEventListener('click', (e) => {
-  if (e.target.id === 'hero') { $('#lightbox-img').src = e.target.src; $('#lightbox').style.display = 'flex'; }
-  else if (e.target.closest('#lightbox')) $('#lightbox').style.display = 'none';
+
+$('#btn-prev').addEventListener('click', () => stepPost(-1));
+$('#btn-next').addEventListener('click', () => stepPost(1));
+$('#btn-detail').addEventListener('click', () => openDetail());
+$('#btn-detail-close').addEventListener('click', () => closeDetail());
+$('#btn-list').addEventListener('click', () => openDrawer());
+$('#drawer-bg').addEventListener('click', () => closeDrawer());
+
+// Touch / keyboard: briefly flash chrome so nav isn't undiscoverable without hover.
+function flashChrome(ms = 1800) {
+  const app = $('#app');
+  if (!app) return;
+  app.classList.add('show-chrome');
+  clearTimeout(chromeHideTimer);
+  chromeHideTimer = setTimeout(() => app.classList.remove('show-chrome'), ms);
+}
+
+// Click empty area of detail backdrop (outside shell content) — close if clicking the dim layer.
+$('#detail').addEventListener('click', (e) => {
+  if (e.target === $('#detail')) closeDetail();
 });
+
+// Touch: swipe left/right on the stage to step posts (ignore if drawer/detail open).
+// Tap near an edge also flashes chrome so the controls are findable without hover.
+let touchStartX = 0, touchStartY = 0, touchActive = false;
+$('#stage').addEventListener('touchstart', (e) => {
+  if (detailOpen || drawerOpen) return;
+  const t = e.changedTouches[0];
+  touchStartX = t.clientX;
+  touchStartY = t.clientY;
+  touchActive = true;
+  const w = window.innerWidth, h = window.innerHeight;
+  const nearEdge = t.clientX < 88 || t.clientX > w - 88 || t.clientY < 88 || t.clientY > h - 72;
+  if (nearEdge) flashChrome(2200);
+}, { passive: true });
+$('#stage').addEventListener('touchend', (e) => {
+  if (!touchActive) return;
+  touchActive = false;
+  const t = e.changedTouches[0];
+  const dx = t.clientX - touchStartX;
+  const dy = t.clientY - touchStartY;
+  if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.2) return;
+  stepPost(dx < 0 ? 1 : -1);
+}, { passive: true });
+
+// Edge taps on touch devices still hit the edge zones (not the stage).
+for (const sel of ['.edge-left', '.edge-right', '.edge-top', '.edge-bottom']) {
+  const el = document.querySelector(sel);
+  if (!el) continue;
+  el.addEventListener('touchstart', () => flashChrome(2200), { passive: true });
+}
+
+document.addEventListener('keydown', (e) => {
+  const tag = (e.target && e.target.tagName) || '';
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target?.isContentEditable) {
+    if (e.key === 'Escape' && drawerOpen) { e.preventDefault(); closeDrawer(); }
+    return;
+  }
+
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    if (detailOpen) closeDetail();
+    else if (drawerOpen) closeDrawer();
+    return;
+  }
+
+  // `c` — copy full transcript of the open summary.
+  if ((e.key === 'c' || e.key === 'C') && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    e.preventDefault();
+    copyTranscript();
+    return;
+  }
+
+  // Open detail overlay.
+  if ((e.key === 'i' || e.key === 'I' || e.key === ' ') && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    e.preventDefault();
+    if (detailOpen) closeDetail();
+    else openDetail();
+    return;
+  }
+
+  // Browse drawer.
+  if ((e.key === 'l' || e.key === 'L') && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    e.preventDefault();
+    if (drawerOpen) closeDrawer();
+    else openDrawer();
+    return;
+  }
+
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+    e.preventDefault();
+    flashChrome(900);
+    stepPost(1);
+  } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    flashChrome(900);
+    stepPost(-1);
+  }
+});
+
+$('#list').addEventListener('pointerenter', (e) => {
+  const img = e.target.closest?.('.item-thumb');
+  if (!img?.dataset?.full) return;
+  preloadFull(img.dataset.full);
+}, true);
 
 $('#save').onclick = () => {
   TOKEN = $('#tok').value.trim();
@@ -383,12 +1084,11 @@ $('#save').onclick = () => {
 if (!TOKEN) {
   $('#auth').hidden = false;
 } else {
-  $('#app').hidden = false;
-  // Keep the token out of the URL bar, but preserve the #s= deep link so the address stays shareable.
+  $('#app').classList.add('on');
   history.replaceState({}, '', location.pathname + (deepLinkId ? `#s=${encodeURIComponent(deepLinkId)}` : ''));
   refresh();
-  // Only the rail refreshes on a timer — re-fetching the open document every 4s would
-  // yank the page out from under someone mid-read.
+  // Only the list refreshes on a timer — re-fetching the open document every 4s would
+  // yank the page out from under someone mid-read. Poster state still soft-updates.
   setInterval(refresh, 4000);
 }
 </script>

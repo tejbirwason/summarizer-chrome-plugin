@@ -8,6 +8,7 @@ export interface Env {
   POSTERS: R2Bucket;
   JOB: DurableObjectNamespace<SummaryJob>;
   ASSETS: Fetcher;
+  IMAGES: ImagesBinding;
   OPENROUTER_API_KEY: string;
   FAL_KEY: string;
   APP_TOKEN: string;

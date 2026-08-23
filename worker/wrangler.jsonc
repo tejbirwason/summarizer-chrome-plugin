@@ -16,6 +16,8 @@
     }
   ],
   "r2_buckets": [{ "binding": "POSTERS", "bucket_name": "summarizer-posters" }],
+  // On-the-fly resize for rail thumbs. Fullscreen stage always serves the original.
+  "images": { "binding": "IMAGES" },
   // One SummaryJob per normalized URL. This is the port of background.js's job store:
   // the DO owns the job and stays alive while the OpenRouter fetch is in flight, which is
   // what preserves "keeps generating after you close the tab". ctx.waitUntil() would only
