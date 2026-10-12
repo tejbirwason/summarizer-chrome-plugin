@@ -27,13 +27,39 @@
       { "name": "JOB", "class_name": "SummaryJob" },
       // Per-summary chat agent (@cloudflare/ai-chat). Binding name is kebab-cased by
       // routeAgentRequest into the /agents/summary-chat/* URL space — don't rename casually.
-      { "name": "SummaryChat", "class_name": "SummaryChat" }
+      { "name": "SummaryChat", "class_name": "SummaryChat" },
+      { "name": "WIKI_PAGE", "class_name": "WikiPage" },
+      // Binding name must stay "WikiChat": routeAgentRequest maps it to /agents/wiki-chat/<thread>.
+      { "name": "WikiChat", "class_name": "WikiChat" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["SummaryJob"] },
-    { "tag": "v2", "new_sqlite_classes": ["SummaryChat"] }
+    { "tag": "v2", "new_sqlite_classes": ["SummaryChat"] },
+    { "tag": "v3", "new_sqlite_classes": ["WikiPage", "WikiChat"] }
   ],
   // Waiting on OpenRouter is I/O, not CPU, so this ceiling is only for markdown/JSON work.
-  "limits": { "cpu_ms": 300000 }
+  "limits": { "cpu_ms": 300000 },
+  // Wiki card extraction (src/wiki.ts). Shared by backfill (/api/wiki/enqueue) and live ingest.
+  "queues": {
+    "producers": [{ "binding": "WIKI_INGEST", "queue": "wiki-ingest" }],
+    "consumers": [
+      {
+        "queue": "wiki-ingest",
+        "max_batch_size": 5,
+        "max_batch_timeout": 5,
+        "max_concurrency": 8,
+        "max_retries": 3,
+        "dead_letter_queue": "wiki-ingest-dlq"
+      }
+    ]
+  },
+  "ai": { "binding": "AI" },
+  "vectorize": [{ "binding": "WIKI_VEC", "index_name": "summarizer-wiki" }],
+  "workflows": [
+    { "name": "wiki-build", "binding": "WIKI_BUILD", "class_name": "WikiBuild" },
+    { "name": "wiki-garden", "binding": "WIKI_GARDEN", "class_name": "WikiGarden" }
+  ],
+  // Weekly gardeners: Sunday 17:00 UTC = Monday 3-4am Sydney.
+  "triggers": { "crons": ["0 17 * * SUN"] }
 }

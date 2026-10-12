@@ -1,0 +1,1224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Wiki</title>
+<style>
+  :root{
+    --bg:#0e0c0b; --panel:#1d1a17; --panel-2:#262220; --line:#322c28;
+    --ink:#ece6df; --ink-dim:#a2988d; --ink-faint:#6e655d;
+    --teal:#4db6a4; --amber:#d9a441; --red:#c9635b; --violet:#a58bd6;
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.55 -apple-system,BlinkMacSystemFont,"Inter","Segoe UI",sans-serif}
+  a{color:var(--teal);text-decoration:none}
+  a:hover{text-decoration:underline}
+  button{font:inherit}
+  code{font-family:var(--mono);font-size:12.5px;background:var(--panel-2);padding:0 4px;border-radius:4px}
+  pre{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px;overflow:auto}
+  pre code{background:none;padding:0}
+  .muted{color:var(--ink-dim)} .faint{color:var(--ink-faint)}
+  [hidden]{display:none !important}
+
+  /* auth */
+  .tokenbar{max-width:420px;margin:12vh auto;padding:24px;background:var(--panel);border:1px solid var(--line);border-radius:12px}
+  .tokenbar h1{font-size:20px;margin:0 0 6px}
+  .tokenbar input{width:100%;margin:12px 0;padding:9px 11px;background:var(--bg);border:1px solid var(--line);border-radius:8px;color:var(--ink);font:inherit}
+  .tokenbar button{padding:8px 16px}
+
+  /* layout */
+  #app{display:grid;grid-template-columns:220px minmax(0,1fr);height:100vh}
+  #app.chat-open{grid-template-columns:220px minmax(0,1fr) 380px}
+  .side{border-right:1px solid var(--line);padding:14px;font-size:13px;overflow:auto}
+  .side .brand{display:flex;justify-content:space-between;align-items:center;margin:0 0 12px}
+  .side .brand b{font-size:15px}
+  .side .brand a{font-size:12px;color:var(--ink-faint)}
+  .side input.search{width:100%;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:7px 10px;color:var(--ink);font:inherit;margin-bottom:12px}
+  .side input.search::placeholder{color:var(--ink-faint)}
+  .side h4{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-faint);margin:14px 0 6px;font-weight:600}
+  .side nav a{display:flex;justify-content:space-between;color:var(--ink-dim);padding:4px 7px;border-radius:5px}
+  .side nav a:hover{background:var(--panel);text-decoration:none}
+  .side nav a.on{background:var(--panel);color:var(--ink)}
+  .side nav a small{color:var(--ink-faint)}
+  .side nav a small.hot{color:var(--amber)}
+  .mainwrap{display:flex;flex-direction:column;min-width:0;height:100vh}
+  .topbar{display:flex;justify-content:flex-end;gap:8px;align-items:center;padding:10px 20px;border-bottom:1px solid var(--line);flex:none}
+  .topbar .grow{flex:1}
+  #main{flex:1;overflow:auto;padding:24px 32px 80px}
+  .read{max-width:760px}
+  .wide{max-width:1100px}
+
+  .btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:7px;padding:4px 10px;font-size:12.5px;color:var(--ink-dim);background:var(--panel);cursor:pointer}
+  .btn:hover{color:var(--ink);border-color:var(--ink-faint);text-decoration:none}
+  .btn.ok{color:var(--teal);border-color:#2d5c54} .btn.no{color:var(--red);border-color:#5c3330}
+  .btn:disabled{opacity:.5;cursor:default}
+  .linkbtn{background:none;border:0;padding:0;color:var(--teal);cursor:pointer;font-size:inherit}
+  .linkbtn:hover{text-decoration:underline}
+
+  h1{font-size:24px;margin:0 0 4px;letter-spacing:-.01em;line-height:1.25}
+  .crumbs{color:var(--ink-faint);font-size:12px;margin-bottom:6px}
+  .crumbs a{color:var(--ink-faint)} .crumbs a:hover{color:var(--ink-dim)}
+  .meta{color:var(--ink-faint);font-size:12.5px;margin:2px 0 18px}
+  .meta a,.meta .linkbtn{color:var(--ink-dim)}
+  h2.sec{font-size:16px;margin:30px 0 10px}
+  .pill{display:inline-block;font-size:11px;padding:0 8px;border-radius:99px;border:1px solid var(--line);color:var(--ink-dim);white-space:nowrap;line-height:18px}
+  .pill.t{color:var(--teal);border-color:#2d5c54} .pill.a{color:var(--amber);border-color:#5e4a22}
+  .pill.r{color:var(--red);border-color:#5c3330} .pill.v{color:var(--violet);border-color:#463a5c}
+  .box{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:14px 0;background:var(--panel)}
+  .box h3{font-size:13px;margin:0 0 6px}
+  .box.new h3{color:var(--teal)}
+  .banner{border:1px solid #5e4a22;color:var(--amber);background:#221b10;border-radius:8px;padding:8px 12px;margin:0 0 16px;font-size:13px}
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chip{background:var(--panel);border:1px solid var(--line);border-radius:99px;padding:2px 10px;font-size:12px;color:var(--ink-dim)}
+  a.chip:hover{color:var(--ink);text-decoration:none;border-color:var(--ink-faint)}
+  .chip small{color:var(--ink-faint);margin-left:4px}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+  .tile{display:block;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;color:var(--ink)}
+  .tile:hover{border-color:var(--ink-faint);text-decoration:none}
+  .tile .c{color:var(--ink-faint);font-size:11.5px}
+  .tile p{margin:6px 0 0;color:var(--ink-dim);font-size:12.5px;line-height:1.45}
+  .srcrow{display:grid;grid-template-columns:96px minmax(0,1fr) auto;gap:12px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)}
+  .thumb{width:96px;height:54px;border-radius:6px;background:linear-gradient(135deg,#2a2420,#3b302a);object-fit:cover;display:block}
+  .thumb.doc{display:flex;align-items:center;justify-content:center;color:var(--ink-faint);font-size:11px}
+  .srcrow b a{color:var(--ink)}
+  .srcrow .sub{color:var(--ink-faint);font-size:12px;margin-top:2px}
+  .srcrow .gist{color:var(--ink-dim);font-size:12.5px;margin-top:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .row{padding:9px 0;border-bottom:1px solid var(--line)}
+  .row a.t{color:var(--ink);font-weight:500}
+  .row .s{color:var(--ink-dim);font-size:13px;margin-top:2px}
+  .row .m{color:var(--ink-faint);font-size:12px}
+  .grp{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-faint);margin:22px 0 4px}
+  .filter{width:100%;max-width:420px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:7px 10px;color:var(--ink);font:inherit;margin:4px 0 12px}
+  ul.feed{margin:4px 0 0 18px;padding:0} ul.feed li{margin:4px 0;color:var(--ink-dim)}
+  ul.feed li a{color:var(--ink)}
+
+  /* prose */
+  .prose{font-size:15px;line-height:1.7}
+  .prose h2{font-size:19px;margin:26px 0 8px}
+  .prose h3{font-size:16px;margin:24px 0 6px}
+  .prose h4{font-size:14px;margin:18px 0 4px}
+  .prose p{margin:0 0 12px}
+  .prose ul,.prose ol{margin:0 0 12px;padding-left:22px}
+  .prose li{margin:3px 0}
+  .prose blockquote{margin:0 0 12px;padding:2px 12px;border-left:3px solid var(--line);color:var(--ink-dim)}
+  .prose hr{border:0;border-top:1px solid var(--line);margin:18px 0}
+  .prose .table-wrap{overflow:auto;margin:0 0 12px}
+  .prose table{border-collapse:collapse;font-size:13px}
+  .prose th,.prose td{border-bottom:1px solid var(--line);padding:6px 10px;text-align:left;vertical-align:top}
+  .prose a.plink{color:var(--teal);border-bottom:1px dotted #2d5c54}
+  .prose a.plink:hover{text-decoration:none;border-bottom-style:solid}
+  .prose .dis{border:1px solid #5e4a22;border-radius:10px;padding:4px 16px 2px;margin:18px 0;background:#1b1610}
+  .prose .dis > h2:first-child,.prose .dis > h3:first-child{color:var(--amber);margin-top:10px}
+  .cite{display:inline-flex;align-items:center;gap:3px;font-size:11px;line-height:17px;background:#1f2b28;color:var(--teal);border-radius:5px;padding:0 6px;margin:0 1px;white-space:nowrap;vertical-align:1px;font-weight:400}
+  .cite::before{content:"\25B6";font-size:7px}
+  .cite:hover{background:#25403a;text-decoration:none}
+  .cite.pending{opacity:.55}
+  .writing{border:1px dashed var(--line);border-radius:10px;padding:18px;color:var(--ink-dim)}
+
+  /* source page */
+  .cols{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:24px}
+  .claim{display:grid;grid-template-columns:64px minmax(0,1fr);gap:10px;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+  .claim .ts{font-size:12px;font-family:var(--mono);white-space:nowrap}
+  .claim .q{color:var(--ink-faint);font-size:12.5px;font-style:italic;margin-top:3px}
+  .claim .tags{margin-top:3px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:12px}
+  .transcript{font-family:var(--mono);font-size:12px;white-space:pre-wrap;max-height:420px;overflow:auto;color:var(--ink-dim);margin-top:8px}
+
+  /* review */
+  .tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:8px 0 6px}
+  .tabs a{color:var(--ink-dim);padding:8px 12px;border-bottom:2px solid transparent}
+  .tabs a.on{color:var(--ink);border-color:var(--teal)}
+  .tabs a:hover{text-decoration:none;color:var(--ink)}
+  .prop{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
+  .prop .d{white-space:pre-wrap;color:var(--ink-dim);font-size:13px;margin-top:4px}
+  .prop details{margin-top:6px;font-size:12px;color:var(--ink-faint)}
+  .prop details pre{font-size:11.5px;max-height:260px}
+  .prop .acts{display:flex;gap:6px;align-items:flex-start}
+
+  /* history */
+  .revs{font-size:13px}
+  .revs button{display:flex;gap:10px;width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--line);padding:6px 2px;color:var(--ink-dim);cursor:pointer}
+  .revs button:hover,.revs button.on{color:var(--ink)}
+  .revs button b{color:var(--ink);min-width:44px}
+
+  /* chat */
+  #chat{display:none;border-left:1px solid var(--line);flex-direction:column;background:#141110;height:100vh;min-width:0}
+  #app.chat-open #chat{display:flex}
+  #chat .hd{padding:10px 12px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center;font-size:13px}
+  #chat .hd b{flex:1}
+  .ctxchip{margin:8px 12px 0;align-self:flex-start;font-size:12px;background:var(--panel);border:1px solid var(--line);border-radius:99px;padding:2px 4px 2px 10px;color:var(--ink-dim);display:flex;gap:6px;align-items:center}
+  .ctxchip button{background:none;border:0;color:var(--ink-faint);cursor:pointer;padding:0 4px}
+  .ctxchip button:hover{color:var(--ink)}
+  #chat-thread{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:12px;font-size:13.5px}
+  .me{align-self:flex-end;background:var(--panel-2);border-radius:10px;padding:8px 12px;max-width:88%;white-space:pre-wrap}
+  .ai .prose{font-size:13.5px;line-height:1.6}
+  .ai .prose p:last-child{margin-bottom:0}
+  .ai .acts{margin-top:8px;display:flex;gap:6px}
+  .tool{font-size:11.5px;color:var(--ink-faint);border-left:2px solid var(--line);padding-left:8px;margin:2px 0;font-family:var(--mono);overflow-wrap:anywhere}
+  .chat-empty{color:var(--ink-faint);font-size:13px;margin:auto 0;text-align:center;line-height:1.6}
+  .err{color:var(--red);font-size:13px}
+  .typing{display:inline-flex;gap:4px;padding:4px 0}
+  .typing i{width:6px;height:6px;border-radius:50%;background:var(--ink-faint);animation:blink 1.2s infinite}
+  .typing i:nth-child(2){animation-delay:.2s} .typing i:nth-child(3){animation-delay:.4s}
+  @keyframes blink{0%,80%,100%{opacity:.25}40%{opacity:1}}
+  .composer{margin:10px 12px 12px;border:1px solid var(--line);border-radius:10px;display:flex;gap:6px;align-items:flex-end;padding:6px 6px 6px 10px;background:var(--panel)}
+  .composer textarea{flex:1;background:none;border:0;color:var(--ink);font:inherit;font-size:13.5px;resize:none;outline:none;max-height:140px;padding:4px 0}
+
+  .spin{display:inline-block;width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--teal);border-radius:50%;animation:rot .8s linear infinite;vertical-align:-2px}
+  @keyframes rot{to{transform:rotate(360deg)}}
+  .loading{color:var(--ink-faint);padding:20px 0}
+  #toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--panel-2);border:1px solid var(--line);color:var(--ink);padding:8px 14px;border-radius:8px;font-size:13px;opacity:0;pointer-events:none;transition:all .2s;z-index:50}
+  #toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+
+  @media (max-width:1100px){
+    #app.chat-open{grid-template-columns:220px minmax(0,1fr)}
+    #chat{position:fixed;right:0;top:0;bottom:0;width:min(380px,100vw);z-index:40;box-shadow:-10px 0 30px #0008}
+  }
+  @media (max-width:760px){
+    #app,#app.chat-open{grid-template-columns:1fr;grid-template-rows:auto 1fr;height:auto;min-height:100vh}
+    .mainwrap{height:auto}
+    .side{border-right:0;border-bottom:1px solid var(--line)}
+    .side nav{display:flex;flex-wrap:wrap;gap:2px}
+    .side h4{display:none}
+    #main{padding:18px 16px 60px}
+    .cols{grid-template-columns:1fr}
+    .srcrow{grid-template-columns:72px minmax(0,1fr)}
+    .srcrow > :nth-child(3){display:none}
+    .thumb{width:72px;height:40px}
+  }
+</style>
+</head>
+<body>
+
+<div id="auth" class="tokenbar" hidden>
+  <h1>Wiki</h1>
+  <p class="muted" style="font-size:14px;margin:0">Paste the app token to open your wiki.</p>
+  <input id="tok" type="password" placeholder="APP_TOKEN" autocomplete="off" />
+  <button id="save" class="btn ok">Unlock</button>
+</div>
+
+<div id="app" hidden>
+  <aside class="side">
+    <div class="brand"><b>Wiki</b><a href="/" data-ext="1">dashboard</a></div>
+    <input id="q" class="search" type="search" placeholder="Search the wiki…  ⌘K" autocomplete="off" />
+    <nav id="nav">
+      <a href="/wiki" data-nav="home">Home</a>
+      <a href="/wiki/topics" data-nav="topic">Topics <small data-count="topic"></small></a>
+      <a href="/wiki/people" data-nav="person">People <small data-count="person"></small></a>
+      <a href="/wiki/orgs" data-nav="org">Companies <small data-count="org"></small></a>
+      <a href="/wiki/products" data-nav="product">Products <small data-count="product"></small></a>
+      <a href="/wiki/concepts" data-nav="concept">Concepts <small data-count="concept"></small></a>
+      <a href="/wiki/sources" data-nav="sources">Sources <small data-count="sources"></small></a>
+      <h4>Review</h4>
+      <a href="/wiki/review" data-nav="review">Proposals <small class="hot" data-count="review"></small></a>
+    </nav>
+  </aside>
+
+  <div class="mainwrap">
+    <div class="topbar">
+      <span class="grow"></span>
+      <button class="btn" id="btn-ask" title="Ask your wiki">Ask your wiki</button>
+    </div>
+    <main id="main"></main>
+  </div>
+
+  <aside id="chat" aria-label="Ask your wiki">
+    <div class="hd">
+      <b>Ask your wiki</b>
+      <button class="btn" id="chat-new" title="Start a new conversation">New chat</button>
+      <button class="btn" id="chat-close" title="Close">✕</button>
+    </div>
+    <div id="chat-ctx" class="ctxchip" hidden></div>
+    <div id="chat-thread"></div>
+    <div class="composer">
+      <textarea id="chat-input" rows="1" placeholder="Ask a question…"></textarea>
+      <button class="btn ok" id="chat-send">Send</button>
+    </div>
+  </aside>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+'use strict';
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+
+// ---------- auth (same token + storage key as the dashboard) ----------
+let TOKEN = localStorage.getItem('summarizer_token') || new URLSearchParams(location.search).get('token');
+if (TOKEN) localStorage.setItem('summarizer_token', TOKEN);
+{
+  const sp = new URLSearchParams(location.search);
+  if (sp.has('token')) {
+    sp.delete('token');
+    const qs = sp.toString();
+    history.replaceState({}, '', location.pathname + (qs ? '?' + qs : '') + location.hash);
+  }
+}
+
+function showAuth() {
+  $('#app').hidden = true;
+  $('#auth').hidden = false;
+  setTimeout(() => $('#tok').focus(), 50);
+}
+
+$('#save').onclick = () => {
+  const t = $('#tok').value.trim();
+  if (!t) return;
+  TOKEN = t;
+  localStorage.setItem('summarizer_token', TOKEN);
+  location.reload();
+};
+$('#tok').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#save').click(); });
+
+class HttpError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, {
+    ...opts,
+    headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json', ...(opts.headers || {}) },
+  });
+  if (r.status === 401) {
+    localStorage.removeItem('summarizer_token');
+    TOKEN = null;
+    showAuth();
+    throw new HttpError(401, 'Unauthorized');
+  }
+  let data = null;
+  try { data = await r.json(); } catch {}
+  if (!r.ok) throw new HttpError(r.status, (data && data.error) || `HTTP ${r.status}`);
+  return data;
+}
+const post = (path, body) => api(path, { method: 'POST', body: JSON.stringify(body || {}) });
+
+// ---------- helpers ----------
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+const ago = (ms) => {
+  if (!ms) return '—';
+  const s = Math.max(0, Math.floor((Date.now() - Number(ms)) / 1000));
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  if (s < 86400 * 60) return `${Math.floor(s / 86400)}d ago`;
+  return fmtDate(ms);
+};
+const fmtDate = (ms) => {
+  if (!ms) return '';
+  const d = new Date(Number(ms));
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+const fmtTs = (s) => {
+  s = Math.max(0, Math.floor(Number(s) || 0));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = String(s % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
+};
+const nfmt = (n) => Number(n || 0).toLocaleString();
+const plural = (n, w, pl) => `${nfmt(n)} ${Number(n) === 1 ? w : (pl || w + 's')}`;
+const short = (t, n = 22) => { t = String(t || '').trim(); return t.length > n ? t.slice(0, n - 1).trimEnd() + '…' : t; };
+const hasTs = (c) => c && c.start_s !== null && c.start_s !== undefined && c.start_s !== '';
+
+const pageHref = (slug) => '/wiki/p/' + String(slug).split('/').map(encodeURIComponent).join('/');
+const srcHref = (id) => '/wiki/s/' + encodeURIComponent(id);
+const slugFallback = (slug) => String(slug).split('/').pop().replace(/-/g, ' ');
+const ytHref = (vid, s) => `https://www.youtube.com/watch?v=${encodeURIComponent(vid)}${hasTs({ start_s: s }) ? `&t=${Math.floor(s)}s` : ''}`;
+const safeUrl = (u) => /^https?:\/\//i.test(String(u || '')) ? String(u) : '';
+
+const KIND_ROUTE = { topic: 'topics', person: 'people', org: 'orgs', product: 'products', concept: 'concepts' };
+const ROUTE_KIND = Object.fromEntries(Object.entries(KIND_ROUTE).map(([k, v]) => [v, k]));
+const KIND_LABEL = { topic: 'Topics', person: 'People', org: 'Companies', product: 'Products', concept: 'Concepts', work: 'Works', place: 'Places', note: 'Notes' };
+const kindLabel = (k) => KIND_LABEL[k] || (k ? k[0].toUpperCase() + k.slice(1) : '');
+
+let toastTimer = 0;
+function toast(msg) {
+  const el = $('#toast');
+  el.textContent = msg;
+  el.classList.add('on');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('on'), 2600);
+}
+
+function thumbHTML(s) {
+  return s && s.video_id
+    ? `<img class="thumb" loading="lazy" alt="" src="https://i.ytimg.com/vi/${encodeURIComponent(s.video_id)}/mqdefault.jpg" />`
+    : `<div class="thumb doc">${esc((s && s.kind) || 'page')}</div>`;
+}
+
+// ---------- citations + markdown ----------
+// Shared claim cache: page views seed it from the page payload, chat fills it via /api/wiki/claims.
+const claimCache = new Map();
+const claimTried = new Set();
+
+function citeHTML(c) {
+  const label = short(c.source_title || 'source') + (hasTs(c) ? ` ~${fmtTs(c.start_s)}` : '');
+  const tip = (c.speaker ? `${c.speaker}: ` : '') + (c.text || '') + (c.source_title ? `\n— ${c.source_title}` : '');
+  let href, ext = true;
+  if (c.video_id) href = ytHref(c.video_id, hasTs(c) ? c.start_s : null);
+  else if (safeUrl(c.url)) href = safeUrl(c.url);
+  else { href = srcHref(c.source_id); ext = false; }
+  return `<a class="cite" href="${esc(href)}"${ext ? ' target="_blank" rel="noreferrer"' : ''} title="${esc(tip)}">${esc(label)}</a>`;
+}
+
+/**
+ * Markdown with [[c:ID]] / [[p:slug]] markers. Markers are swapped for private-use
+ * placeholder tokens BEFORE escaping, the (escaped) markdown is rendered, and only then are
+ * placeholders replaced with chip HTML built from escaped fields. No raw model text is ever
+ * injected as HTML.
+ *   opts.claims: object map of claims (page view) — falls back to claimCache
+ *   opts.links:  map slug → {title}
+ *   opts.pending: render unresolved claim ids as a pending chip (chat), else drop them
+ */
+function renderMarked(src, opts = {}) {
+  const toks = [];
+  const A = '', B = '';
+  let text = String(src || '').replace(/\[\[(c|p):([^\]\n]+)\]\]/g, (_, k, v) => {
+    toks.push({ k, v: v.trim() });
+    return A + (toks.length - 1) + B;
+  });
+  let html = md(text);
+  html = html.replace(new RegExp(A + '(\\d+)' + B, 'g'), (_, i) => {
+    const t = toks[Number(i)];
+    if (!t) return '';
+    if (t.k === 'c') {
+      const c = (opts.claims && opts.claims[t.v]) || claimCache.get(t.v);
+      if (c) return citeHTML(c);
+      if (opts.pending && !claimTried.has(t.v)) return `<span class="cite pending" title="loading citation…">…</span>`;
+      return '';
+    }
+    const l = opts.links && opts.links[t.v];
+    const title = (l && l.title) || slugFallback(t.v);
+    return `<a class="plink" href="${esc(pageHref(t.v))}">${esc(title)}</a>`;
+  });
+  return html;
+}
+
+const claimIdsIn = (s) => [...String(s || '').matchAll(/\[\[c:([^\]\n]+)\]\]/g)].map((m) => m[1].trim());
+
+// Minimal markdown → HTML (same approach as the dashboard): escape first, then emit tags.
+function md(src) {
+  const lines = esc(src).split('\n');
+  let out = '', inList = false, listTag = 'ul', inCode = false, para = [];
+
+  const inline = (t) => t
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/__([^_]+)__/g, '<strong>$1</strong>')
+    .replace(/(^|[\s(])\*([^*\n]+)\*/g, '$1<em>$2</em>')
+    .replace(/(^|[\s(])_([^_\n]+)_(?=$|[\s).,;:!?])/g, '$1<em>$2</em>')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>')
+    .replace(/\[([^\]]+)\]\((\/wiki[^)\s]*)\)/g, '<a href="$2">$1</a>');
+  const flushPara = () => { if (para.length) { out += `<p>${inline(para.join(' '))}</p>`; para = []; } };
+  const closeList = () => { if (inList) { out += `</${listTag}>`; inList = false; } };
+  const closeAll = () => { flushPara(); closeList(); };
+
+  const isRow = (l) => l !== undefined && /\|/.test(l) && /^\s*\|?[^|]*\|/.test(l.trim());
+  const isSep = (l) => l !== undefined && /-/.test(l) && /\|/.test(l) && /^[\s|:-]+$/.test(l.trim());
+  const cells = (l) => {
+    let t = l.trim();
+    if (t.startsWith('|')) t = t.slice(1);
+    if (t.endsWith('|')) t = t.slice(0, -1);
+    return t.split('|').map((c) => c.trim());
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].replace(/\s+$/, '');
+    if (/^```/.test(line)) { closeAll(); inCode = !inCode; out += inCode ? '<pre><code>' : '</code></pre>'; continue; }
+    if (inCode) { out += line + '\n'; continue; }
+    if (!line.trim()) { closeAll(); continue; }
+
+    if (isRow(line) && isSep(lines[i + 1])) {
+      closeAll();
+      const head = cells(line);
+      let body = '', j = i + 2;
+      for (; j < lines.length && isRow(lines[j]) && lines[j].trim(); j++) {
+        const row = cells(lines[j]);
+        body += '<tr>' + head.map((_, c) => `<td>${inline(row[c] ?? '')}</td>`).join('') + '</tr>';
+      }
+      out += '<div class="table-wrap"><table><thead><tr>' + head.map((h) => `<th>${inline(h)}</th>`).join('') +
+        `</tr></thead><tbody>${body}</tbody></table></div>`;
+      i = j - 1;
+      continue;
+    }
+
+    let m;
+    if ((m = /^(#{1,6})\s+(.*)$/.exec(line))) { closeAll(); const h = Math.min(m[1].length + 1, 4); out += `<h${h}>${inline(m[2].replace(/\s*#+$/, ''))}</h${h}>`; continue; }
+    if (/^(---|\*\*\*|___)$/.test(line.trim())) { closeAll(); out += '<hr />'; continue; }
+    if ((m = /^&gt;\s?(.*)$/.exec(line))) { closeAll(); out += `<blockquote>${inline(m[1])}</blockquote>`; continue; }
+    if ((m = /^\s*[-*+]\s+(.*)$/.exec(line))) {
+      flushPara();
+      if (!inList || listTag !== 'ul') { closeList(); out += '<ul>'; inList = true; listTag = 'ul'; }
+      out += `<li>${inline(m[1])}</li>`; continue;
+    }
+    if ((m = /^\s*\d+[.)]\s+(.*)$/.exec(line))) {
+      flushPara();
+      if (!inList || listTag !== 'ol') { closeList(); out += '<ol>'; inList = true; listTag = 'ol'; }
+      out += `<li>${inline(m[1])}</li>`; continue;
+    }
+    closeList();
+    para.push(line.trim());
+  }
+  closeAll();
+  if (inCode) out += '</code></pre>';
+  return out;
+}
+
+// Wrap a "Disagreements" heading and everything up to the next heading of the same or higher level.
+function boxDisagreements(root) {
+  for (const h of $$('h2, h3', root)) {
+    if (!/^disagree/i.test(h.textContent.trim())) continue;
+    const lvl = Number(h.tagName[1]);
+    const box = document.createElement('div');
+    box.className = 'dis';
+    h.parentNode.insertBefore(box, h);
+    let n = h;
+    while (n) {
+      const next = n.nextSibling;
+      box.appendChild(n);
+      n = next;
+      if (n && /^H[1-4]$/.test(n.tagName || '') && Number(n.tagName[1]) <= lvl) break;
+    }
+  }
+}
+
+// ---------- routing ----------
+let navGen = 0;
+let currentPage = null;   // {slug,title} of the open wiki page, for "ask about this page"
+let counts = {};          // sidebar counts
+
+function parseRoute() {
+  const p = location.pathname.replace(/\/+$/, '') || '/wiki';
+  const sp = new URLSearchParams(location.search);
+  if (p === '/wiki') return { v: 'home' };
+  let m;
+  if ((m = /^\/wiki\/(topics|people|orgs|products|concepts)$/.exec(p))) return { v: 'list', kind: ROUTE_KIND[m[1]] };
+  if (p === '/wiki/sources') return { v: 'sources' };
+  if (p === '/wiki/review') return { v: 'review', status: sp.get('status') || 'open' };
+  if (p === '/wiki/search') return { v: 'search', q: sp.get('q') || '' };
+  try {
+    if ((m = /^\/wiki\/p\/(.+)$/.exec(p))) return { v: 'page', slug: m[1].split('/').map(decodeURIComponent).join('/') };
+    if ((m = /^\/wiki\/s\/(.+)$/.exec(p))) return { v: 'source', id: decodeURIComponent(m[1]) };
+  } catch {}
+  return { v: '404' };
+}
+
+function go(href, replace) {
+  if (replace) history.replaceState({}, '', href);
+  else history.pushState({}, '', href);
+  route();
+}
+
+function setNav(key) {
+  for (const a of $$('#nav a')) a.classList.toggle('on', a.dataset.nav === key);
+}
+
+function setCounts(c) {
+  Object.assign(counts, c);
+  for (const el of $$('[data-count]')) {
+    const v = counts[el.dataset.count];
+    el.textContent = v ? nfmt(v) : '';
+  }
+}
+
+const loadingHTML = (what) => `<div class="loading"><span class="spin"></span> Loading ${esc(what || '')}…</div>`;
+const errorHTML = (e) => `<div class="read"><h1>Something went wrong</h1><p class="err">${esc(e && e.message || e)}</p><p><button class="btn" onclick="route()">Retry</button></p></div>`;
+const notFoundHTML = (what) => `<div class="read"><h1>Not found</h1><p class="muted">${esc(what || 'This page doesn’t exist')}.</p><p><a href="/wiki">← Wiki home</a></p></div>`;
+
+async function route() {
+  const gen = ++navGen;
+  const r = parseRoute();
+  const main = $('#main');
+  main.scrollTop = 0;
+  currentPage = null;
+  const isCurrent = () => gen === navGen;
+  setNav({ home: 'home', list: r.kind, sources: 'sources', review: 'review' }[r.v] || '');
+  if (r.v === 'search') $('#q').value = r.q;
+  try {
+    if (r.v === 'home') await viewHome(main, isCurrent);
+    else if (r.v === 'list') await viewList(main, r.kind, isCurrent);
+    else if (r.v === 'sources') await viewSources(main, isCurrent);
+    else if (r.v === 'review') await viewReview(main, r.status, isCurrent);
+    else if (r.v === 'search') await viewSearch(main, r.q, isCurrent);
+    else if (r.v === 'page') await viewPage(main, r.slug, isCurrent);
+    else if (r.v === 'source') await viewSource(main, r.id, isCurrent);
+    else { document.title = 'Not found · Wiki'; main.innerHTML = notFoundHTML(); }
+  } catch (e) {
+    if (!isCurrent() || (e && e.status === 401)) return;
+    main.innerHTML = e && e.status === 404 ? notFoundHTML() : errorHTML(e);
+  }
+}
+
+// ---------- views ----------
+async function viewHome(main, ok) {
+  document.title = 'Wiki';
+  main.innerHTML = loadingHTML('wiki');
+  const d = await api('/api/wiki/home');
+  if (!ok()) return;
+  const s = d.stats || {};
+  setCounts({ review: d.open_proposals, sources: s.sources });
+  const banner = Number(s.written) < Number(s.pages)
+    ? `<div class="banner">Editors are still writing pages: ${nfmt(s.written)} of ${nfmt(s.pages)} done</div>` : '';
+  const digest = d.digest && d.digest.body_md
+    ? `<div class="box new"><h3>This week <span class="faint" style="font-weight:400">· ${esc(ago(d.digest.created_at))}</span></h3><div class="prose" style="font-size:14px">${renderMarked(d.digest.body_md, { links: d.links || {} })}</div></div>` : '';
+  const tiles = (d.topics || []).map((t) => `
+    <a class="tile" href="${esc(pageHref(t.slug))}">
+      <b>${esc(t.title)}</b>
+      <div class="c">${plural(t.source_count, 'source')}${t.grp ? ' · ' + esc(t.grp) : ''}</div>
+      ${t.summary ? `<p>${esc(t.summary)}</p>` : ''}
+    </a>`).join('');
+  const recent = (d.recent_sources || []).map((r) => {
+    const pages = r.pages || [];
+    const pl = pages.slice(0, 5).map((p) => `<a href="${esc(pageHref(p.slug))}">${esc(p.title)}</a>`).join(', ');
+    return `<div class="srcrow">${thumbHTML(r)}
+      <div><b><a href="${esc(srcHref(r.id))}">${esc(r.title || r.id)}</a></b>
+        <div class="sub">${pages.length ? `→ ${plural(pages.length, 'page')} · ${pl}${pages.length > 5 ? '…' : ''}` : 'not linked to pages yet'}</div></div>
+      <span class="faint" style="font-size:12px">${esc(ago(r.created_at))}</span></div>`;
+  }).join('');
+  const revs = (d.recent_revisions || []).map((r) => `
+    <li><a href="${esc(pageHref(r.slug))}">${esc(r.title)}</a> <span class="faint">rev ${esc(r.rev)} · ${esc(r.reason || '')} · ${esc(ago(r.created_at))}</span></li>`).join('');
+  main.innerHTML = `<div class="wide">
+    <h1>Your wiki</h1>
+    <div class="meta">${plural(s.sources, 'source')} · ${plural(s.pages, 'page')} · ${plural(s.claims, 'claim')} · last ingest ${esc(ago(s.last_ingest))}${s.cost_usd != null ? ` · $${Number(s.cost_usd).toFixed(2)} spent` : ''}</div>
+    ${banner}${digest}
+    <h2 class="sec">Biggest topics <a href="/wiki/topics" style="font-size:12px;font-weight:400;margin-left:6px">all topics →</a></h2>
+    ${tiles ? `<div class="tiles">${tiles}</div>` : '<p class="faint">No topic pages yet.</p>'}
+    <div class="cols" style="margin-top:8px">
+      <div><h2 class="sec">Recently added</h2>${recent || '<p class="faint">Nothing ingested yet.</p>'}</div>
+      <div><h2 class="sec">Recently rewritten</h2>${revs ? `<ul class="feed">${revs}</ul>` : '<p class="faint">No rewrites yet.</p>'}</div>
+    </div>
+  </div>`;
+}
+
+async function viewList(main, kind, ok) {
+  document.title = `${kindLabel(kind)} · Wiki`;
+  main.innerHTML = loadingHTML(kindLabel(kind).toLowerCase());
+  const d = await api(`/api/wiki/list?kind=${encodeURIComponent(kind)}`);
+  if (!ok()) return;
+  const c = {};
+  for (const x of d.counts || []) c[x.kind] = x.n;
+  setCounts(c);
+  const pages = d.pages || [];
+  const rowHTML = (p) => `<div class="row" data-f="${esc((p.title + ' ' + (p.summary || '')).toLowerCase())}">
+    <a class="t" href="${esc(pageHref(p.slug))}">${esc(p.title)}</a>
+    <span class="m"> · ${plural(p.source_count, 'source')} · ${esc(ago(p.updated_at))}</span>
+    ${p.summary ? `<div class="s">${esc(p.summary)}</div>` : ''}</div>`;
+  let body = '';
+  if (kind === 'topic') {
+    const groups = new Map();
+    for (const p of pages) {
+      const g = p.grp || 'Other';
+      if (!groups.has(g)) groups.set(g, []);
+      groups.get(g).push(p);
+    }
+    for (const [g, list] of groups) body += `<section data-grp><div class="grp">${esc(g)} <span>· ${list.length}</span></div>${list.map(rowHTML).join('')}</section>`;
+  } else body = pages.map(rowHTML).join('');
+  main.innerHTML = `<div class="read">
+    <h1>${esc(kindLabel(kind))}</h1>
+    <div class="meta">${plural(pages.length, 'page')}</div>
+    <input class="filter" id="lf" placeholder="Filter…" autocomplete="off" />
+    <div id="lbody">${body || '<p class="faint">No pages of this kind yet.</p>'}</div></div>`;
+  $('#lf').addEventListener('input', (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    for (const r of $$('#lbody .row')) r.hidden = !!q && !r.dataset.f.includes(q);
+    for (const sec of $$('#lbody section[data-grp]')) sec.hidden = !$$('.row', sec).some((r) => !r.hidden);
+  });
+}
+
+async function viewSources(main, ok) {
+  document.title = 'Sources · Wiki';
+  main.innerHTML = loadingHTML('sources');
+  const d = await api('/api/wiki/sources');
+  if (!ok()) return;
+  const list = d.sources || [];
+  setCounts({ sources: list.length });
+  const LIMIT = 300;
+  const rowHTML = (s) => `<div class="srcrow">${thumbHTML(s)}
+    <div><b><a href="${esc(srcHref(s.id))}">${esc(s.title || s.id)}</a></b>
+      ${s.gist ? `<div class="gist">${esc(s.gist)}</div>` : ''}
+      <div class="sub">${s.gist ? '' : 'no card yet · '}feeds ${plural(s.pages || 0, 'page')}</div></div>
+    <span class="faint" style="font-size:12px">${esc(fmtDate(s.created_at))}</span></div>`;
+  main.innerHTML = `<div class="read">
+    <h1>Sources</h1>
+    <div class="meta">${plural(list.length, 'source')}</div>
+    <input class="filter" id="sf" placeholder="Filter by title or gist…" autocomplete="off" />
+    <div id="sbody"></div></div>`;
+  const draw = (q) => {
+    const hits = q ? list.filter((s) => `${s.title || ''} ${s.gist || ''}`.toLowerCase().includes(q)) : list;
+    $('#sbody').innerHTML = hits.slice(0, LIMIT).map(rowHTML).join('') +
+      (hits.length > LIMIT ? `<p class="faint">Showing ${LIMIT} of ${nfmt(hits.length)}; filter to narrow.</p>` : '') +
+      (hits.length ? '' : '<p class="faint">No matches.</p>');
+  };
+  draw('');
+  $('#sf').addEventListener('input', (e) => draw(e.target.value.trim().toLowerCase()));
+}
+
+async function viewPage(main, slug, ok) {
+  document.title = 'Wiki';
+  main.innerHTML = loadingHTML('page');
+  let d;
+  try { d = await api(`/api/wiki/page?slug=${encodeURIComponent(slug)}`); }
+  catch (e) {
+    if (e.status === 404) { if (ok()) main.innerHTML = notFoundHTML(`No page “${slug}”`); return; }
+    throw e;
+  }
+  if (!ok()) return;
+  const p = d.page, meta = d.meta || {};
+  currentPage = { slug: p.slug, title: p.title };
+  document.title = `${p.title} · Wiki`;
+  for (const [id, c] of Object.entries(d.claims || {})) claimCache.set(id, c);
+  setNav(p.kind);
+
+  const kindCrumb = KIND_ROUTE[p.kind] ? `<a href="/wiki/${KIND_ROUTE[p.kind]}">${esc(kindLabel(p.kind))}</a>` : esc(kindLabel(p.kind));
+  const crumbs = `${kindCrumb} /${p.kind === 'topic' && meta.grp ? ` ${esc(meta.grp)} /` : ''}`;
+  const sources = (d.sources || []).map((s) => `<div class="srcrow">${thumbHTML(s)}
+    <div><b><a href="${esc(srcHref(s.id))}">${esc(s.title || s.id)}</a></b>
+      <div class="sub">${plural(s.claims_used || 0, 'claim')} used · ${esc(fmtDate(s.created_at))}</div></div>
+    ${s.video_id ? `<a class="btn" href="${esc(ytHref(s.video_id))}" target="_blank" rel="noreferrer">watch</a>`
+      : safeUrl(s.url) ? `<a class="btn" href="${esc(safeUrl(s.url))}" target="_blank" rel="noreferrer">open</a>` : '<span></span>'}</div>`).join('');
+  const related = (d.related || []).map((r) =>
+    `<a class="chip" href="${esc(pageHref(r.slug))}">${esc(r.title)}<small>${esc(r.kind)}</small></a>`).join('');
+  const revs = d.revisions || [];
+  const desc = meta.description || meta.context || '';
+
+  main.innerHTML = `<div class="read">
+    <div class="crumbs">${crumbs}</div>
+    <h1>${esc(p.title)}</h1>
+    <div class="meta">${plural(p.source_count, 'source')} · ${plural(p.claim_count || Object.keys(d.claims || {}).length, 'claim')} cited · rev ${esc(p.rev || 0)} · updated ${esc(ago(p.updated_at))}${p.dirty ? ' · <span style="color:var(--amber)">update queued</span>' : ''}
+      · <button class="linkbtn" id="pg-hist">history</button>
+      · <button class="linkbtn" id="pg-rewrite">rewrite now</button>
+      · <button class="linkbtn" id="pg-ask">ask about this page</button></div>
+    <div id="pg-histbox" hidden></div>
+    <div id="pg-revnote"></div>
+    ${desc && !p.body_md ? `<p class="muted">${esc(desc)}</p>` : ''}
+    <div id="pg-body"></div>
+    <h2 class="sec">Sources <span class="faint" style="font-weight:400;font-size:13px">${(d.sources || []).length}</span></h2>
+    ${sources || '<p class="faint">No sources linked.</p>'}
+    ${related ? `<h2 class="sec">Related</h2><div class="chips">${related}</div>` : ''}
+  </div>`;
+
+  const showBody = (body_md) => {
+    const el = $('#pg-body');
+    if (!body_md) {
+      el.innerHTML = `<div class="writing"><span class="spin"></span> Being written… (${plural(p.source_count, 'source')} queued)${p.summary ? `<p class="muted" style="margin:10px 0 0">${esc(p.summary)}</p>` : ''}</div>`;
+      return;
+    }
+    el.className = 'prose';
+    el.innerHTML = renderMarked(body_md, { claims: d.claims || {}, links: d.links || {} });
+    boxDisagreements(el);
+  };
+  showBody(p.body_md);
+
+  $('#pg-ask').onclick = () => openChat({ slug: p.slug, title: p.title });
+  $('#pg-hist').onclick = () => {
+    const box = $('#pg-histbox');
+    box.hidden = !box.hidden;
+    if (box.hidden) return;
+    box.innerHTML = `<div class="box"><h3>History</h3><div class="revs">${revs.length ? revs.map((r) => `
+      <button data-rev="${esc(r.rev)}"><b>rev ${esc(r.rev)}</b><span style="flex:1">${esc(r.reason || '')}</span>
+      <span class="faint">${esc(r.model || '')}${r.cost_usd != null ? ` · $${Number(r.cost_usd).toFixed(3)}` : ''} · ${esc(ago(r.created_at))}</span></button>`).join('')
+      : '<p class="faint">No revisions yet.</p>'}</div></div>`;
+  };
+  $('#pg-histbox').addEventListener('click', async (e) => {
+    const b = e.target.closest('button[data-rev]');
+    if (!b) return;
+    const rev = b.dataset.rev;
+    $$('#pg-histbox button').forEach((x) => x.classList.toggle('on', x === b));
+    if (Number(rev) === Number(p.rev)) { $('#pg-revnote').innerHTML = ''; showBody(p.body_md); return; }
+    $('#pg-revnote').innerHTML = loadingHTML(`rev ${rev}`);
+    try {
+      const r = await api(`/api/wiki/revision?slug=${encodeURIComponent(p.slug)}&rev=${encodeURIComponent(rev)}`);
+      if (!ok()) return;
+      // Old revisions may cite claims the current page no longer does; fetch any we lack.
+      await ensureClaims(claimIdsIn(r.body_md));
+      if (!ok()) return;
+      $('#pg-revnote').innerHTML = `<div class="banner">Viewing rev ${esc(rev)} · <button class="linkbtn" id="pg-cur">back to current</button></div>`;
+      $('#pg-cur').onclick = () => { $('#pg-revnote').innerHTML = ''; $$('#pg-histbox button').forEach((x) => x.classList.remove('on')); showBody(p.body_md); };
+      showBody(r.body_md);
+    } catch (err) {
+      if (ok()) $('#pg-revnote').innerHTML = `<p class="err">Couldn’t load rev ${esc(rev)}: ${esc(err.message)}</p>`;
+    }
+  });
+  $('#pg-rewrite').onclick = async () => {
+    const b = $('#pg-rewrite');
+    if (b.disabled) return;
+    b.disabled = true;
+    b.innerHTML = '<span class="spin"></span> rewriting (30–90s)…';
+    try {
+      await post('/api/wiki/rewrite', { slug: p.slug });
+      toast('Page rewritten');
+      if (ok()) route();
+    } catch (err) {
+      if (err.status === 401) return;
+      toast(`Rewrite failed: ${err.message}`);
+      if (ok()) { b.disabled = false; b.textContent = 'rewrite now'; }
+    }
+  };
+}
+
+async function viewSource(main, id, ok) {
+  document.title = 'Source · Wiki';
+  main.innerHTML = loadingHTML('source');
+  let d;
+  try { d = await api(`/api/wiki/source?id=${encodeURIComponent(id)}`); }
+  catch (e) {
+    if (e.status === 404) { if (ok()) main.innerHTML = notFoundHTML('No such source'); return; }
+    throw e;
+  }
+  if (!ok()) return;
+  const s = d.source, card = d.card;
+  document.title = `${s.title || 'Source'} · Wiki`;
+  setNav('sources');
+  let topics = [];
+  try { topics = card && card.topics ? JSON.parse(card.topics) : []; } catch {}
+  if (!Array.isArray(topics)) topics = [];
+  const orig = safeUrl(s.url);
+
+  const claims = (d.claims || []).map((c) => {
+    const ts = hasTs(c)
+      ? (s.video_id ? `<a href="${esc(ytHref(s.video_id, c.start_s))}" target="_blank" rel="noreferrer">▶ ~${esc(fmtTs(c.start_s))}</a>` : `<span class="faint">~${esc(fmtTs(c.start_s))}</span>`)
+      : '<span class="faint">—</span>';
+    const kindCls = /contest|disput|predict|opinion/i.test(c.kind || '') ? ' a' : '';
+    return `<div class="claim"><span class="ts">${ts}</span><div>
+      <div>${esc(c.text)}</div>
+      ${c.quote ? `<div class="q">“${esc(c.quote)}”</div>` : ''}
+      <div class="tags">${c.kind ? `<span class="pill${kindCls}">${esc(c.kind)}</span>` : ''}${c.speaker ? `<span class="faint">${esc(c.speaker)}</span>` : ''}${Number(c.quote_ok) === 0 ? '<span class="faint" title="The quote could not be matched in the transcript">· quote unverified</span>' : ''}</div>
+    </div></div>`;
+  }).join('');
+  const pages = (d.pages || []).map((p) => `<li><a href="${esc(pageHref(p.slug))}">${esc(p.title)}</a> <span class="faint">${esc(p.kind)}</span></li>`).join('');
+  const seen = new Set();
+  const ents = (d.mentions || []).filter((m) => {
+    const k = (m.page || m.name || '').toLowerCase();
+    if (!k || seen.has(k)) return false;
+    seen.add(k); return true;
+  }).map((m) => {
+    const tip = esc(`${m.kind || ''}${m.context ? ': ' + m.context : ''}`);
+    return m.page
+      ? `<a class="chip" href="${esc(pageHref(m.page))}" title="${tip}">${esc(m.name)}</a>`
+      : `<span class="chip" title="${tip}">${esc(m.name)}</span>`;
+  }).join('');
+
+  main.innerHTML = `<div class="wide">
+    <div class="crumbs"><a href="/wiki/sources">Sources</a> / ${esc(s.kind || (s.video_id ? 'video' : 'page'))} /</div>
+    <h1>${esc(s.title || s.id)}</h1>
+    <div class="meta">${esc(fmtDate(s.created_at))}${orig ? ` · <a href="${esc(orig)}" target="_blank" rel="noreferrer">original ↗</a>` : ''}${s.chars ? ` · ${nfmt(s.chars)} chars` : ''}${card && card.model ? ` · card by ${esc(card.model)}` : ''}${card && card.cost_usd != null ? ` · $${Number(card.cost_usd).toFixed(3)}` : ''}</div>
+    ${card && card.gist ? `<p class="prose" style="max-width:760px">${esc(card.gist)}</p>` : '<p class="faint">No card yet; this source hasn’t been read by the wiki.</p>'}
+    ${topics.length ? `<div class="chips" style="margin:-4px 0 10px">${topics.map((t) => `<span class="chip">${esc(t)}</span>`).join('')}</div>` : ''}
+    <div class="cols">
+      <div><h2 class="sec" style="margin-top:12px">Claims <span class="faint" style="font-weight:400;font-size:13px">${(d.claims || []).length}</span></h2>${claims || '<p class="faint">No claims extracted.</p>'}</div>
+      <div>
+        <div class="box"><h3>Pages this source feeds</h3>${pages ? `<ul class="feed">${pages}</ul>` : '<p class="faint" style="margin:0">None yet.</p>'}</div>
+        <div class="box"><h3>Entities</h3>${ents ? `<div class="chips">${ents}</div>` : '<p class="faint" style="margin:0">None found.</p>'}</div>
+        <div class="box"><h3>Transcript</h3><button class="btn" id="tr-btn">show transcript</button><div id="tr" class="transcript" hidden></div></div>
+      </div>
+    </div></div>`;
+
+  let loaded = false;
+  $('#tr-btn').onclick = async () => {
+    const box = $('#tr'), b = $('#tr-btn');
+    if (loaded) { box.hidden = !box.hidden; b.textContent = box.hidden ? 'show transcript' : 'hide transcript'; return; }
+    b.disabled = true;
+    b.innerHTML = '<span class="spin"></span> loading…';
+    try {
+      const t = await api(`/api/wiki/transcript?id=${encodeURIComponent(s.id)}`);
+      if (!ok()) return;
+      box.textContent = t.transcript || '(empty transcript)';
+      box.hidden = false; loaded = true;
+      b.textContent = 'hide transcript';
+    } catch (err) {
+      if (!ok()) return;
+      b.textContent = 'show transcript';
+      box.hidden = false; box.textContent = `Couldn’t load transcript: ${err.message}`;
+    } finally { b.disabled = false; }
+  };
+}
+
+async function viewSearch(main, q, ok) {
+  document.title = `Search: ${q} · Wiki`;
+  if (!q.trim()) { main.innerHTML = `<div class="read"><h1>Search</h1><p class="faint">Type in the search box and press Enter.</p></div>`; return; }
+  main.innerHTML = loadingHTML('results');
+  const d = await api(`/api/wiki/search?q=${encodeURIComponent(q)}`);
+  if (!ok()) return;
+  const pages = (d.pages || []).map((p) => `<div class="row">
+    <a class="t" href="${esc(pageHref(p.slug))}">${esc(p.title)}</a> <span class="pill">${esc(p.kind)}</span>
+    <span class="m"> · ${plural(p.source_count, 'source')}</span>
+    ${p.summary ? `<div class="s">${esc(p.summary)}</div>` : ''}</div>`).join('');
+  const claims = (d.claims || []).map((c) => `<div class="row">
+    <div>${esc(c.text)} ${citeHTML(c)}</div>
+    <div class="m">${c.speaker ? esc(c.speaker) + ' · ' : ''}<a href="${esc(srcHref(c.source_id))}">${esc(c.source_title || c.source_id)}</a>${c.kind ? ` · ${esc(c.kind)}` : ''}</div></div>`).join('');
+  main.innerHTML = `<div class="read">
+    <h1>Search: ${esc(q)}</h1>
+    <div class="meta">${plural((d.pages || []).length, 'page')} · ${plural((d.claims || []).length, 'claim')}</div>
+    <h2 class="sec">Pages</h2>${pages || '<p class="faint">No matching pages.</p>'}
+    <h2 class="sec">Claims</h2>${claims || '<p class="faint">No matching claims.</p>'}
+  </div>`;
+}
+
+const PROP_PILL = { merge: 'v', new_page: 't', contradiction: 'r', note: '' };
+
+async function viewReview(main, status, ok) {
+  document.title = 'Review · Wiki';
+  if (!['open', 'approved', 'rejected'].includes(status)) status = 'open';
+  main.innerHTML = loadingHTML('proposals');
+  const d = await api(`/api/wiki/proposals?status=${encodeURIComponent(status)}`);
+  if (!ok()) return;
+  const c = { open: 0, approved: 0, rejected: 0 };
+  for (const x of d.counts || []) c[x.status] = x.n;
+  setCounts({ review: c.open });
+  const list = d.proposals || [];
+  const tab = (s) => `<a href="/wiki/review${s === 'open' ? '' : '?status=' + s}" class="${s === status ? 'on' : ''}">${s[0].toUpperCase() + s.slice(1)} <span class="faint">${nfmt(c[s])}</span></a>`;
+  const payloadPretty = (pl) => {
+    if (!pl) return '';
+    try { return JSON.stringify(typeof pl === 'string' ? JSON.parse(pl) : pl, null, 2); } catch { return String(pl); }
+  };
+  const rows = list.map((p) => {
+    const pp = payloadPretty(p.payload);
+    return `<div class="prop" data-id="${esc(p.id)}"><div>
+      <span class="pill ${PROP_PILL[p.kind] ?? ''}">${esc(String(p.kind || '').replace(/_/g, ' '))}</span> <b>${esc(p.title)}</b>
+      <span class="faint" style="font-size:12px"> · ${esc(ago(p.created_at))}</span>
+      ${p.detail ? `<div class="d">${esc(p.detail)}</div>` : ''}
+      ${pp ? `<details><summary>payload</summary><pre>${esc(pp)}</pre></details>` : ''}
+    </div>${status === 'open' ? `<div class="acts"><button class="btn ok" data-act="approve">Approve</button><button class="btn no" data-act="reject">Reject</button></div>` : '<div></div>'}</div>`;
+  }).join('');
+  main.innerHTML = `<div class="read" style="max-width:860px">
+    <h1>Review queue</h1>
+    <div class="meta">Agents propose and you decide. Structural changes wait here.</div>
+    <div class="tabs">${tab('open')}${tab('approved')}${tab('rejected')}</div>
+    <div id="props">${rows || `<p class="faint">No ${esc(status)} proposals.</p>`}</div></div>`;
+  $('#props').addEventListener('click', async (e) => {
+    const b = e.target.closest('button[data-act]');
+    if (!b) return;
+    const row = b.closest('.prop');
+    const action = b.dataset.act;
+    $$('button', row).forEach((x) => { x.disabled = true; });
+    b.innerHTML = `<span class="spin"></span> ${action === 'approve' ? 'Approving' : 'Rejecting'}`;
+    try {
+      const r = await post(`/api/wiki/proposals/${encodeURIComponent(row.dataset.id)}`, { action });
+      if (r && r.error) throw new Error(r.error);
+      row.remove();
+      setCounts({ review: Math.max(0, (counts.review || 1) - 1) });
+      toast(action === 'approve' ? 'Approved' : 'Rejected');
+      if (!$('#props .prop')) $('#props').innerHTML = '<p class="faint">Queue is empty.</p>';
+    } catch (err) {
+      if (err.status === 401) return;
+      toast(`Failed: ${err.message}`);
+      $$('button', row).forEach((x) => { x.disabled = false; });
+      b.textContent = action === 'approve' ? 'Approve' : 'Reject';
+    }
+  });
+}
+
+// Fetch any claim ids we don't have yet (used by chat + old revisions).
+async function ensureClaims(ids) {
+  const need = [...new Set(ids)].filter((id) => !claimCache.has(id) && !claimTried.has(id));
+  if (!need.length) return false;
+  for (let i = 0; i < need.length; i += 150) {
+    const batch = need.slice(i, i + 150);
+    try {
+      const r = await api(`/api/wiki/claims?ids=${batch.map(encodeURIComponent).join(',')}`);
+      for (const [id, c] of Object.entries((r && r.claims) || {})) claimCache.set(id, c);
+    } catch {}
+    batch.forEach((id) => claimTried.add(id));
+  }
+  return true;
+}
+
+// ---------- chat (WikiChat agent, @cloudflare/ai-chat wire protocol, same as dashboard) ----------
+//   → cf_agent_use_chat_request   {id, init:{method:'POST', body:'{messages, pageSlug}'}}
+//   ← cf_agent_use_chat_response  {id, body:<one bare-JSON UI-stream part>, done}
+//   ← cf_agent_chat_messages      {messages}  (authoritative persisted thread)
+//   ⇄ cf_agent_stream_resume_*    replay of a stream that survived a reload
+const THREAD_KEY = 'wiki_chat_thread';
+let chatThread = localStorage.getItem(THREAD_KEY) || newThreadId();
+localStorage.setItem(THREAD_KEY, chatThread);
+let chatOpen = false;
+let chatWS = null;
+let chatWSGen = 0;
+let chatMsgs = [];
+let chatStreaming = false;
+let chatLive = '';
+let chatLiveTools = [];
+let chatFinal = null;      // {text, tools} shown until the persisted thread confirms it
+let chatErr = '';
+let chatCtx = null;        // {slug,title}
+
+function newThreadId() { return `t-${Date.now().toString(36)}`; }
+const chatAgentPath = () => `/agents/wiki-chat/${encodeURIComponent(chatThread)}`;
+const msgText = (m) => (m.parts || []).filter((p) => p.type === 'text').map((p) => p.text).join('');
+const msgTools = (m) => (m.parts || []).filter((p) => p.type === 'data-tool' && p.data).map((p) => p.data);
+
+function toolLine(t) {
+  const args = Object.values(t.args || {}).map((v) => typeof v === 'string' ? JSON.stringify(short(v, 60)) : JSON.stringify(v)).join(', ');
+  return `<div class="tool">${esc(t.name || 'tool')}(${esc(args)})${t.summary ? ` → ${esc(t.summary)}` : ''}</div>`;
+}
+
+function aiBlock(text, tools, idx, done) {
+  return `<div class="ai">${(tools || []).map(toolLine).join('')}
+    ${text ? `<div class="prose">${renderMarked(text, { pending: true })}</div>` : ''}
+    ${done && text ? `<div class="acts"><button class="btn ok" data-save="${idx}">Save as page</button></div>` : ''}</div>`;
+}
+
+// Flat list of rendered turns so "Save as page" can find the answer + its question.
+let chatTurns = [];
+
+function renderChat() {
+  const el = $('#chat-thread');
+  const stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 60;
+  chatTurns = [];
+  let html = '', lastQ = '';
+  const pushAi = (text, tools, done) => {
+    chatTurns.push({ text, q: lastQ });
+    html += aiBlock(text, tools, chatTurns.length - 1, done);
+  };
+  for (const m of chatMsgs) {
+    const text = msgText(m);
+    if (m.role === 'user') { if (text) { lastQ = text; html += `<div class="me">${esc(text)}</div>`; } }
+    else if (text || msgTools(m).length) pushAi(text, msgTools(m), true);
+  }
+  if (chatFinal) pushAi(chatFinal.text, chatFinal.tools, true);
+  if (chatStreaming) {
+    html += `<div class="ai">${chatLiveTools.map(toolLine).join('')}${chatLive
+      ? `<div class="prose">${renderMarked(chatLive, { pending: true })}</div>` : ''}<div class="typing"><i></i><i></i><i></i></div></div>`;
+  }
+  if (chatErr) html += `<div class="err">${esc(chatErr)}</div>`;
+  if (!html) html = `<div class="chat-empty">Ask anything across your sources.<br/>Answers cite claims and link to pages.</div>`;
+  el.innerHTML = html;
+  if (stick) el.scrollTop = el.scrollHeight;
+}
+
+function renderCtx() {
+  const el = $('#chat-ctx');
+  if (!chatCtx) { el.hidden = true; el.innerHTML = ''; return; }
+  el.hidden = false;
+  el.innerHTML = `<span>context: ${esc(chatCtx.title)}</span><button title="Remove page context" aria-label="Remove page context">✕</button>`;
+  $('button', el).onclick = () => { chatCtx = null; renderCtx(); };
+}
+
+// After an answer lands, fetch the claims it cites and re-render chips.
+async function resolveChatClaims() {
+  const ids = [];
+  for (const m of chatMsgs) if (m.role === 'assistant') ids.push(...claimIdsIn(msgText(m)));
+  if (chatFinal) ids.push(...claimIdsIn(chatFinal.text));
+  if (await ensureClaims(ids)) renderChat();
+}
+
+function confirmFinal() {
+  if (chatFinal && chatMsgs.some((m) => m.role === 'assistant' && msgText(m) === chatFinal.text)) chatFinal = null;
+}
+
+async function chatFetchHistory() {
+  const thread = chatThread;
+  try {
+    const r = await fetch(chatAgentPath() + '/get-messages', { headers: { Authorization: `Bearer ${TOKEN}` } });
+    if (!r.ok || thread !== chatThread) return;
+    const msgs = await r.json();
+    if (thread !== chatThread) return;
+    chatMsgs = Array.isArray(msgs) ? msgs : [];
+    confirmFinal();
+    renderChat();
+    resolveChatClaims();
+  } catch {}
+}
+
+function chatConnect() {
+  const gen = ++chatWSGen;
+  try { chatWS && chatWS.close(); } catch {}
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${proto}://${location.host}${chatAgentPath()}?token=${encodeURIComponent(TOKEN)}`);
+  chatWS = ws;
+  ws.onopen = () => {
+    if (gen !== chatWSGen) return;
+    ws.send(JSON.stringify({ type: 'cf_agent_stream_resume_request', probeId: Math.random().toString(36).slice(2, 10) }));
+  };
+  ws.onmessage = (ev) => { if (gen === chatWSGen && typeof ev.data === 'string') chatFrame(ev.data); };
+  ws.onclose = () => {
+    if (gen !== chatWSGen) return;
+    chatWS = null;
+    if (chatOpen) setTimeout(() => { if (gen === chatWSGen && chatOpen) chatConnect(); }, 1500);
+  };
+}
+
+function chatChunk(body) {
+  if (!body) return;
+  let j = null;
+  try { j = JSON.parse(body); } catch {
+    const s = String(body);
+    if (s.includes('data:')) {
+      for (const line of s.split('\n')) {
+        const t = line.trim();
+        if (t.startsWith('data:') && t.slice(5).trim() !== '[DONE]') chatChunk(t.slice(5).trim());
+      }
+    } else chatErr = s;
+    return;
+  }
+  if (!j || typeof j !== 'object') return;
+  if (j.type === 'text-delta' && typeof j.delta === 'string') chatLive += j.delta;
+  else if (j.type === 'data-tool' && j.data) chatLiveTools.push(j.data);
+  else if (j.type === 'error') chatErr = String(j.errorText || 'stream error');
+  // text-start / text-end / start / finish carry nothing to render; `done` on the frame ends the turn.
+}
+
+function chatFrame(raw) {
+  let f; try { f = JSON.parse(raw); } catch { return; }
+  if (f.type === 'cf_agent_chat_messages') {
+    chatMsgs = f.messages || [];
+    confirmFinal();
+    renderChat();
+    resolveChatClaims();
+  } else if (f.type === 'cf_agent_use_chat_response') {
+    if (!chatStreaming) { chatStreaming = true; chatLive = ''; chatLiveTools = []; }
+    chatChunk(f.body || '');
+    if (f.done) {
+      chatStreaming = false;
+      if (chatLive || chatLiveTools.length) chatFinal = { text: chatLive, tools: chatLiveTools };
+      chatLive = ''; chatLiveTools = [];
+      renderChat();
+      resolveChatClaims();
+      setTimeout(chatFetchHistory, 400);
+    } else renderChat();
+  } else if (f.type === 'cf_agent_stream_resuming') {
+    chatStreaming = true; chatLive = ''; chatLiveTools = [];
+    chatWS && chatWS.send(JSON.stringify({ type: 'cf_agent_stream_resume_ack', id: f.id }));
+    renderChat();
+  } else if (f.type === 'cf_agent_chat_clear') {
+    chatMsgs = []; chatFinal = null; renderChat();
+  }
+}
+
+function chatSend() {
+  const ta = $('#chat-input');
+  const text = ta.value.trim();
+  if (!text || chatStreaming) return;
+  if (!chatWS || chatWS.readyState !== 1) { toast('Chat is reconnecting — try again in a second'); chatConnect(); return; }
+  chatErr = '';
+  if (chatFinal) {
+    chatMsgs.push({ id: crypto.randomUUID(), role: 'assistant', parts: [{ type: 'text', text: chatFinal.text }] });
+    chatFinal = null;
+  }
+  chatMsgs.push({ id: crypto.randomUUID(), role: 'user', parts: [{ type: 'text', text }] });
+  ta.value = ''; ta.style.height = 'auto';
+  chatStreaming = true; chatLive = ''; chatLiveTools = [];
+  renderChat();
+  const body = { messages: chatMsgs };
+  if (chatCtx) body.pageSlug = chatCtx.slug;
+  chatWS.send(JSON.stringify({
+    type: 'cf_agent_use_chat_request',
+    id: crypto.randomUUID(),
+    init: { method: 'POST', body: JSON.stringify(body) },
+  }));
+}
+
+function resetChatState() {
+  chatMsgs = []; chatLive = ''; chatLiveTools = []; chatFinal = null; chatErr = ''; chatStreaming = false;
+}
+
+async function openChat(ctx) {
+  if (ctx) { chatCtx = ctx; renderCtx(); }
+  const wasOpen = chatOpen;
+  chatOpen = true;
+  $('#app').classList.add('chat-open');
+  if (!wasOpen) {
+    renderChat();
+    await chatFetchHistory();
+    if (!chatWS) chatConnect();
+  }
+  setTimeout(() => $('#chat-input').focus(), 80);
+}
+
+function closeChat() {
+  chatOpen = false;
+  $('#app').classList.remove('chat-open');
+}
+
+$('#btn-ask').onclick = () => (chatOpen ? closeChat() : openChat(currentPage));
+$('#chat-close').onclick = closeChat;
+$('#chat-new').onclick = () => {
+  chatThread = newThreadId();
+  localStorage.setItem(THREAD_KEY, chatThread);
+  resetChatState();
+  renderChat();
+  chatConnect();
+  $('#chat-input').focus();
+};
+$('#chat-send').onclick = chatSend;
+$('#chat-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); chatSend(); }
+});
+$('#chat-input').addEventListener('input', (e) => {
+  const ta = e.target;
+  ta.style.height = 'auto';
+  ta.style.height = Math.min(ta.scrollHeight, 140) + 'px';
+});
+$('#chat-thread').addEventListener('click', async (e) => {
+  const b = e.target.closest('button[data-save]');
+  if (!b) return;
+  const turn = chatTurns[Number(b.dataset.save)];
+  if (!turn || !turn.text) return;
+  const title = prompt('Title for the new page:', short(turn.q || 'Chat answer', 80).replace(/…$/, ''));
+  if (!title || !title.trim()) return;
+  b.disabled = true;
+  b.innerHTML = '<span class="spin"></span> Saving';
+  try {
+    await post('/api/wiki/save-answer', { title: title.trim(), body_md: turn.text });
+    toast('Sent to review queue');
+    setCounts({ review: (counts.review || 0) + 1 });
+    b.textContent = 'Saved';
+  } catch (err) {
+    if (err.status === 401) return;
+    toast(`Save failed: ${err.message}`);
+    b.disabled = false; b.textContent = 'Save as page';
+  }
+});
+
+// ---------- global events ----------
+document.addEventListener('click', (e) => {
+  if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  const a = e.target.closest('a[href]');
+  if (!a || a.target === '_blank' || a.dataset.ext) return;
+  const href = a.getAttribute('href');
+  if (!href || !/^\/wiki(\/|$|\?)/.test(href)) return;
+  e.preventDefault();
+  if (href !== location.pathname + location.search) go(href);
+  if (window.matchMedia('(max-width:1100px)').matches && chatOpen && a.closest('#chat')) closeChat();
+});
+window.addEventListener('popstate', route);
+
+$('#q').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    const q = e.target.value.trim();
+    if (q) go(`/wiki/search?q=${encodeURIComponent(q)}`);
+  } else if (e.key === 'Escape') e.target.blur();
+});
+document.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    $('#q').focus();
+    $('#q').select();
+  }
+});
+
+// ---------- boot ----------
+async function loadCounts() {
+  try {
+    const [l, pr] = await Promise.all([
+      api('/api/wiki/list?kind=note'),
+      api('/api/wiki/proposals?status=open'),
+    ]);
+    const c = {};
+    for (const x of (l && l.counts) || []) c[x.kind] = x.n;
+    for (const x of (pr && pr.counts) || []) if (x.status === 'open') c.review = x.n;
+    if (c.review == null) c.review = 0;
+    setCounts(c);
+  } catch {}
+}
+
+if (!TOKEN) showAuth();
+else {
+  $('#app').hidden = false;
+  route();
+  loadCounts();
+}
+</script>
+</body>
+</html>

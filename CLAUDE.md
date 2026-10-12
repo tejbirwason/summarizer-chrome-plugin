@@ -71,6 +71,19 @@ npm run test:coverage
 
 **Follow-up / Regenerate:** content-dual.js sends `followup {question}` or `regenerate {modelId, prompt}`; the background continues/replaces the job's conversation and streams back. The model picker persists `pref:defaultModel`; the prompt editor persists `pref:defaultPrompt`.
 
+### Wiki (`/wiki`)
+
+An agent-maintained wiki compiled from every summarized source. Design + mockups: `docs/wiki-design.html`. UI: `worker/public/wiki.html` (same `APP_TOKEN` as the dashboard).
+
+- **Cards** (`src/wiki.ts`): queue `wiki-ingest` → Haiku 5.5 extracts claims (with a verbatim quote), entity mentions, topics → D1 `cards`/`claims`/`mentions`. Skips unchanged transcripts, stubs under 300 chars, and duplicate transcripts (only one copy of a shared transcript feeds the wiki). Claim timestamps are **approximate** (quote position at ~15 chars/s).
+- **Graph** (`src/wiki-graph.ts`): canonical `topics` (librarian-designed), `entities` + `entity_alias`, `page_sources`. Topic page at 2+ sources, entity page at 3+.
+- **Pages** (`src/wiki-page.ts`): one `WikiPage` DO per page. `schedule()` debounces (10 min on live ingest); the alarm runs the editor (Sonnet 5.5 above 12 sources, else Haiku). Code validates citations `[[c:ID]]` and links `[[p:slug]]`.
+- **Live ingest**: `SummaryJob.start()` and `/api/import` enqueue → card → `attachSource()` → affected pages rewrite. Deleting a summary (`dropCard`) removes its claims/vectors and rewrites the pages it fed.
+- **Build** (`src/wiki-build.ts`, Workflow `wiki-build`): full recompile — taxonomy, topic map, entity merge, pages, FTS + Vectorize, schedule all editors. `POST /api/wiki/build`. Re-running re-designs the taxonomy; pass `{"skipTaxonomy":true,"skipEntities":true}` to only re-index and rewrite.
+- **Gardeners** (`src/wiki-garden.ts`, Workflow `wiki-garden`, cron Sunday 17:00 UTC): merge / contradiction / new-topic proposals + weekly digest. Proposals wait in `/wiki/review`; approving applies them (`applyProposal`).
+- **Chat** (`src/wiki-chat.ts`): `WikiChat` agent at `/agents/wiki-chat/<thread>`, tools `search_wiki` (FTS5 + Vectorize `summarizer-wiki`, RRF), `read_page`, `read_source`.
+- Debug: `POST /api/wiki/ingest-now {"id"}` runs one card synchronously and returns the real error; `POST /api/wiki/rewrite {"slug"}` rewrites one page now; `GET /api/wiki/stats`.
+
 **YouTube Summarization:** youtube-content.js sends `summarizeVideo {videoId}` → background.js fetches the transcript via yt-summary.py → starts a job exactly like text summarization → **content-dual.js** renders the panel (youtube-content.js only draws buttons + clears their spinners on summary events).
 
 ### YouTube Transcript Summarization Flow

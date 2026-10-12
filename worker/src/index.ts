@@ -2,8 +2,14 @@ import { routeAgentRequest } from 'agents';
 import { SummaryJob, type Env } from './job';
 import { SummaryChat } from './chat';
 import { listModels, DEFAULT_MODEL_ID, DEFAULT_PROMPT } from './config';
+import { handleIngestBatch, dropCard, type IngestMsg } from './wiki';
+import { WikiPage } from './wiki-page';
+import { WikiChat } from './wiki-chat';
+import { WikiBuild } from './wiki-build';
+import { WikiGarden } from './wiki-garden';
+import { wikiApi } from './wiki-api';
 
-export { SummaryJob, SummaryChat };
+export { SummaryJob, SummaryChat, WikiPage, WikiChat, WikiBuild, WikiGarden };
 
 // Port of background.js's normUrl: strip hash/tracking but KEEP YouTube's ?v=, since that
 // is the only thing distinguishing one video from another.
@@ -150,6 +156,11 @@ export default {
       return routed ?? json({ error: 'not found' }, { status: 404 }, origin);
     }
 
+    if (p === '/wiki' || p.startsWith('/wiki/')) {
+      // Every /wiki/* deep link serves the SPA. Ask the asset binding for "/wiki", not
+      // "/wiki.html": the latter answers with a 307 to /wiki and loses the path.
+      return env.ASSETS.fetch(new Request(new URL('/wiki', url), req));
+    }
     if (!p.startsWith('/api/')) return env.ASSETS.fetch(req);
 
     if (!authed(req, env)) return json({ error: 'unauthorized' }, { status: 401 }, origin);
@@ -261,6 +272,7 @@ export default {
              ON CONFLICT(id) DO UPDATE SET r2_key=excluded.r2_key, state='complete', updated_at=excluded.updated_at`,
           ).bind(id, id, b.posterKey, ts, ts).run();
         }
+        await env.WIKI_INGEST.send({ sourceId: id });
         return json({ ok: true, id }, {}, origin);
       }
 
@@ -303,8 +315,55 @@ export default {
 
       if (p.startsWith('/api/summaries/') && req.method === 'DELETE') {
         const id = decodeURIComponent(p.slice('/api/summaries/'.length));
+        await dropCard(env, id);
         await env.DB.prepare('DELETE FROM summaries WHERE id = ?').bind(id).run();
         return json({ ok: true }, {}, origin);
+      }
+
+      // --- wiki (step 1: cards) ---
+      // Enqueue sources for card extraction. {ids:[...]} or {limit:N} (newest first, only
+      // sources without a card unless force). Backfill and, later, live ingest use this queue.
+      if (p === '/api/wiki/enqueue' && req.method === 'POST') {
+        const b = (await req.json().catch(() => ({}))) as { ids?: string[]; limit?: number; force?: boolean };
+        let ids = b.ids ?? [];
+        if (!ids.length) {
+          const rows = await env.DB.prepare(
+            `SELECT s.id FROM summaries s LEFT JOIN cards c ON c.source_id = s.id
+             WHERE length(s.transcript) > 0 ${b.force ? '' : 'AND c.source_id IS NULL'}
+             ORDER BY s.created_at DESC LIMIT ?`,
+          ).bind(Math.min(b.limit ?? 20, 2000)).all<{ id: string }>();
+          ids = (rows.results ?? []).map((r) => r.id);
+        }
+        for (let i = 0; i < ids.length; i += 100) {
+          await env.WIKI_INGEST.sendBatch(ids.slice(i, i + 100).map((sourceId) => ({ body: { sourceId, force: b.force } })));
+        }
+        return json({ enqueued: ids.length }, {}, origin);
+      }
+
+      if (p === '/api/wiki/stats' && req.method === 'GET') {
+        const s = await env.DB.prepare(
+          `SELECT (SELECT COUNT(*) FROM summaries WHERE length(transcript) > 0) AS sources,
+                  COUNT(*) AS cards, SUM(cost_usd) AS cost_usd, SUM(tokens_in) AS tokens_in,
+                  SUM(tokens_out) AS tokens_out, AVG(duration_ms) AS avg_ms,
+                  (SELECT COUNT(*) FROM claims) AS claims,
+                  (SELECT AVG(quote_ok) FROM claims) AS quote_ok_rate,
+                  (SELECT COUNT(DISTINCT name) FROM mentions) AS entities
+           FROM cards`,
+        ).first();
+        return json(s, {}, origin);
+      }
+
+      if (p.startsWith('/api/wiki/')) {
+        const r = await wikiApi(req, env, p, url, (d, i) => json(d, i, origin));
+        if (r) return r;
+      }
+
+      if (p === '/api/wiki/card' && req.method === 'GET') {
+        const id = url.searchParams.get('id') ?? '';
+        const card = await env.DB.prepare('SELECT * FROM cards WHERE source_id = ?').bind(id).first();
+        const claims = await env.DB.prepare('SELECT * FROM claims WHERE source_id = ? ORDER BY idx').bind(id).all();
+        const mentions = await env.DB.prepare('SELECT * FROM mentions WHERE source_id = ?').bind(id).all();
+        return json({ card, claims: claims.results, mentions: mentions.results }, {}, origin);
       }
 
       return json({ error: 'not found' }, { status: 404 }, origin);
@@ -312,4 +371,14 @@ export default {
       return json({ error: String(e) }, { status: 500 }, origin);
     }
   },
-} satisfies ExportedHandler<Env>;
+
+  async queue(batch: MessageBatch<IngestMsg>, env: Env) {
+    await handleIngestBatch(batch, env);
+  },
+
+  // Weekly wiki gardeners (wrangler.jsonc triggers.crons).
+  async scheduled(_c: ScheduledController, env: Env) {
+    const inst = await env.WIKI_GARDEN.create({});
+    console.log('wiki garden started', inst.id);
+  },
+} satisfies ExportedHandler<Env, IngestMsg>;

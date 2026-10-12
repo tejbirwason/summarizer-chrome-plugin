@@ -11,6 +11,13 @@ export interface Env {
   // kebab-cases it into the /agents/summary-chat/<name> URL space the dashboard calls.
   SummaryChat: DurableObjectNamespace<import('./chat').SummaryChat>;
   ASSETS: Fetcher;
+  WIKI_INGEST: Queue<import('./wiki').IngestMsg>;
+  WIKI_PAGE: DurableObjectNamespace<import('./wiki-page').WikiPage>;
+  WikiChat: DurableObjectNamespace<import('./wiki-chat').WikiChat>;
+  WIKI_VEC: VectorizeIndex;
+  WIKI_BUILD: Workflow<import('./wiki-build').BuildParams>;
+  WIKI_GARDEN: Workflow;
+  AI: Ai;
   IMAGES: ImagesBinding;
   OPENROUTER_API_KEY: string;
   FAL_KEY: string;
@@ -80,6 +87,9 @@ export class SummaryJob extends DurableObject<Env> {
     };
     await this.ctx.storage.put('job', job);
     await this.upsertSummary(job);
+    // Wiki live ingest. Fire-and-forget: the card extractor skips unchanged sources, so a
+    // regenerate of the same transcript costs nothing.
+    this.env.WIKI_INGEST.send({ sourceId: job.id }).catch((e) => console.error('wiki enqueue failed', String(e)));
     this.run(job, model, prompt);
     return { id: job.id, activeModelId: model.id };
   }

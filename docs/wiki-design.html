@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Summarizer Wiki — Blueprint</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{
+    --bg:#0e0c0b; --panel:#1d1a17; --panel-2:#262220; --line:#322c28;
+    --ink:#ece6df; --ink-dim:#a2988d; --ink-faint:#6e655d;
+    --teal:#4db6a4; --amber:#d9a441; --red:#c9635b; --violet:#a58bd6;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.55 -apple-system,BlinkMacSystemFont,"Inter","Segoe UI",sans-serif}
+  a{color:var(--teal);text-decoration:none}
+  code,.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+  header{padding:28px 36px 0;max-width:1240px;margin:0 auto}
+  h1{font-size:24px;margin:0 0 4px;letter-spacing:-.01em}
+  .sub{color:var(--ink-dim);margin:0 0 18px;max-width:880px}
+  nav.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);max-width:1240px;margin:0 auto;padding:0 36px;position:sticky;top:0;background:var(--bg);z-index:5}
+  nav.tabs button{background:none;border:0;color:var(--ink-dim);padding:12px 14px;font:inherit;cursor:pointer;border-bottom:2px solid transparent}
+  nav.tabs button.on{color:var(--ink);border-color:var(--teal)}
+  main{max-width:1240px;margin:0 auto;padding:24px 36px 80px}
+  section.tab{display:none} section.tab.on{display:block}
+  h2{font-size:17px;margin:28px 0 10px} h2:first-child{margin-top:0}
+  h3{font-size:14px;margin:0 0 6px}
+  .grid{display:grid;gap:14px}
+  .g2{grid-template-columns:1fr 1fr} .g3{grid-template-columns:repeat(3,1fr)} .g4{grid-template-columns:repeat(4,1fr)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .card p{margin:4px 0;color:var(--ink-dim)}
+  .pill{display:inline-block;font-size:11px;padding:1px 8px;border-radius:99px;border:1px solid var(--line);color:var(--ink-dim);margin-right:4px}
+  .pill.t{color:var(--teal);border-color:#2d5c54} .pill.a{color:var(--amber);border-color:#5e4a22} .pill.r{color:var(--red);border-color:#5c3330} .pill.v{color:var(--violet);border-color:#463a5c}
+  .tldr{border-left:3px solid var(--teal);padding:10px 16px;background:var(--panel);border-radius:0 10px 10px 0;margin-bottom:20px}
+  .tldr ol{margin:6px 0 0 18px;padding:0} .tldr li{margin:2px 0}
+  table{border-collapse:collapse;width:100%;font-size:13px}
+  th,td{border-bottom:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+  th{color:var(--ink-dim);font-weight:500}
+  .muted{color:var(--ink-dim)} .faint{color:var(--ink-faint)}
+  .warn{color:var(--amber)}
+
+  /* architecture */
+  .arch{display:grid;grid-template-columns:1fr 300px;gap:14px}
+  svg .node rect{fill:var(--panel);stroke:var(--line);rx:8}
+  svg .node{cursor:pointer}
+  svg .node:hover rect,svg .node.sel rect{stroke:var(--ink-dim)}
+  svg .node text{fill:var(--ink);font-size:12px}
+  svg .node text.k{fill:var(--ink-faint);font-size:10px}
+  svg .lane{fill:none;stroke-width:1.6}
+  svg .live{stroke:var(--teal)} svg .back{stroke:var(--amber);stroke-dasharray:5 4} svg .gard{stroke:var(--violet);stroke-dasharray:2 4} svg .read{stroke:var(--ink-faint)}
+  #detail h3{color:var(--teal)}
+  .legend span{margin-right:14px;font-size:12px;color:var(--ink-dim)}
+  .legend i{display:inline-block;width:18px;height:0;border-top:2px solid;vertical-align:middle;margin-right:5px}
+
+  /* pipeline strips */
+  .strip{display:flex;gap:0;align-items:stretch;margin:8px 0 4px;overflow-x:auto}
+  .step{flex:1;min-width:150px;background:var(--panel);border:1px solid var(--line);padding:10px 12px;position:relative}
+  .step:first-child{border-radius:10px 0 0 10px} .step:last-child{border-radius:0 10px 10px 0}
+  .step+.step{border-left:0}
+  .step b{display:block;font-size:12.5px;margin-bottom:3px}
+  .step span{color:var(--ink-dim);font-size:12px}
+  .step .n{position:absolute;top:8px;right:10px;color:var(--ink-faint);font-size:11px}
+
+  /* mockups */
+  .mockbar{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+  .mockbar button{background:var(--panel);border:1px solid var(--line);color:var(--ink-dim);border-radius:8px;padding:6px 12px;font:inherit;cursor:pointer}
+  .mockbar button.on{color:var(--ink);border-color:var(--teal)}
+  .browser{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#151210}
+  .chrome{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--panel-2);border-bottom:1px solid var(--line)}
+  .dots i{display:inline-block;width:10px;height:10px;border-radius:50%;background:#3a3330;margin-right:4px}
+  .url{flex:1;background:var(--bg);border-radius:6px;padding:4px 10px;color:var(--ink-dim);font-size:12px}
+  .mock{display:none} .mock.on{display:grid}
+  .app{grid-template-columns:220px 1fr;min-height:560px}
+  .app.withchat{grid-template-columns:220px 1fr 340px}
+  .side{border-right:1px solid var(--line);padding:14px;font-size:13px}
+  .side .search{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:7px 10px;color:var(--ink-faint);margin-bottom:14px}
+  .side h4{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-faint);margin:14px 0 6px}
+  .side a{display:flex;justify-content:space-between;color:var(--ink-dim);padding:3px 6px;border-radius:5px}
+  .side a.on{background:var(--panel);color:var(--ink)}
+  .side a small{color:var(--ink-faint)}
+  .page{padding:22px 28px;overflow:auto}
+  .page h1{font-size:22px}
+  .crumbs{color:var(--ink-faint);font-size:12px;margin-bottom:6px}
+  .meta{color:var(--ink-faint);font-size:12px;margin:2px 0 16px}
+  .cite{display:inline-flex;align-items:center;gap:3px;font-size:11px;background:#1f2b28;color:var(--teal);border-radius:5px;padding:0 6px;margin:0 1px;white-space:nowrap;cursor:pointer}
+  .cite::before{content:"▶";font-size:8px}
+  .box{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:14px 0;background:var(--panel)}
+  .box.dis{border-color:#5e4a22} .box.dis h3{color:var(--amber)}
+  .box.new h3{color:var(--teal)}
+  .srcrow{display:grid;grid-template-columns:88px 1fr auto;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
+  .thumb{width:88px;height:50px;border-radius:6px;background:linear-gradient(135deg,#2a2420,#3b302a);position:relative}
+  .thumb::after{content:attr(data-d);position:absolute;right:4px;bottom:3px;font-size:10px;background:#000a;padding:0 4px;border-radius:3px;color:#ddd}
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chip{background:var(--panel);border:1px solid var(--line);border-radius:99px;padding:3px 10px;font-size:12px;color:var(--ink-dim)}
+  .chip b{color:var(--ink);font-weight:500}
+  .tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  .tile{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
+  .tile .c{color:var(--ink-faint);font-size:11px}
+  .tile p{margin:6px 0 0;color:var(--ink-dim);font-size:12.5px}
+  .feed li{margin:5px 0;color:var(--ink-dim)} .feed li b{color:var(--ink);font-weight:500}
+  .claim{display:grid;grid-template-columns:58px 1fr;gap:10px;padding:7px 0;border-bottom:1px solid var(--line)}
+  .claim .ts{color:var(--teal);font-size:12px}
+  .chat{border-left:1px solid var(--line);display:flex;flex-direction:column;background:#141110}
+  .chat .hd{padding:12px 14px;border-bottom:1px solid var(--line);font-size:13px;display:flex;justify-content:space-between}
+  .msgs{flex:1;padding:14px;display:flex;flex-direction:column;gap:12px;font-size:13px}
+  .me{align-self:flex-end;background:var(--panel-2);border-radius:10px;padding:8px 12px;max-width:85%}
+  .ai{color:var(--ink)}
+  .tool{font-size:11.5px;color:var(--ink-faint);border-left:2px solid var(--line);padding-left:8px;margin:4px 0}
+  .composer{margin:12px;border:1px solid var(--line);border-radius:10px;padding:10px;color:var(--ink-faint);font-size:13px}
+  .btn{display:inline-block;border:1px solid var(--line);border-radius:7px;padding:4px 10px;font-size:12px;color:var(--ink-dim);background:var(--panel)}
+  .btn.ok{color:var(--teal);border-color:#2d5c54} .btn.no{color:var(--red);border-color:#5c3330}
+  .prop{display:grid;grid-template-columns:1fr auto;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
+  .diff{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--bg);border-radius:6px;padding:8px 10px;margin-top:6px}
+  .diff .m{color:var(--red)} .diff .p{color:var(--teal)}
+  .note{font-size:12px;color:var(--ink-faint);margin-top:10px}
+  ul.tight{margin:4px 0 0 18px;padding:0} ul.tight li{margin:2px 0;color:var(--ink-dim)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Summarizer Wiki: Blueprint</h1>
+  <p class="sub">An agent-maintained wiki over every transcript and page in D1. First a <b>one-time backfill</b>, then a <b>live update after each new summary</b>, browsable in the dashboard and <b>chattable</b>. All of it runs on the existing <code>summarizer</code> Worker.</p>
+</header>
+<nav class="tabs">
+  <button data-t="arch" class="on">Architecture</button>
+  <button data-t="flows">Pipelines</button>
+  <button data-t="ui">UI mockups</button>
+  <button data-t="data">Data model</button>
+  <button data-t="dec">Decisions &amp; cost</button>
+</nav>
+<main>
+
+<!-- ============ ARCHITECTURE ============ -->
+<section class="tab on" id="arch">
+  <div class="tldr"><b>In short</b>
+    <ol>
+      <li><b>Claims are the atoms.</b> Each source is turned into a <i>card</i>: claims with timestamps, entities and topics. Pages are written from claims, never straight from raw text.</li>
+      <li><b>One Durable Object per wiki page</b> (<code>WikiPage</code>) applies its edits one at a time. That lets ingest run in parallel without two agents clobbering the same page.</li>
+      <li><b>The models make the calls</b> (structure, merges, summaries, contradictions). <b>Code checks the results</b>: every link must resolve and every citation must name a real claim ID.</li>
+      <li><b>Backfill and live updates share one ingest path.</b> Backfill is a Workflow that pushes all 1,114 sources through the same queue a new summary uses.</li>
+    </ol>
+  </div>
+  <div class="legend">
+    <span><i style="border-color:var(--teal)"></i>live ingest</span>
+    <span><i style="border-color:var(--amber);border-top-style:dashed"></i>backfill</span>
+    <span><i style="border-color:var(--violet);border-top-style:dotted"></i>gardeners (cron)</span>
+    <span><i style="border-color:var(--ink-faint)"></i>read / query</span>
+  </div>
+  <div class="arch">
+    <div class="card" style="padding:6px">
+      <svg viewBox="0 0 900 560" width="100%">
+        <defs>
+          <marker id="ar" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#6e655d"/></marker>
+        </defs>
+        <!-- lanes -->
+        <path class="lane live" marker-end="url(#ar)" d="M170 125 L235 125"/>
+        <path class="lane live" marker-end="url(#ar)" d="M170 60 C200 60 200 110 235 115"/>
+        <path class="lane back" marker-end="url(#ar)" d="M170 225 C205 225 205 140 235 135"/>
+        <path class="lane live" marker-end="url(#ar)" d="M385 125 L430 125"/>
+        <path class="lane live" marker-end="url(#ar)" d="M580 125 L625 125"/>
+        <path class="lane live" marker-end="url(#ar)" d="M700 150 L700 205"/>
+        <path class="lane live" marker-end="url(#ar)" d="M505 150 C505 185 640 190 650 205"/>
+        <path class="lane back" marker-end="url(#ar)" d="M310 330 C420 330 430 260 505 150"/>
+        <path class="lane back" marker-end="url(#ar)" d="M385 345 C520 345 560 260 640 240"/>
+        <path class="lane live" marker-end="url(#ar)" d="M775 230 L800 230 L800 330 L775 330"/>
+        <path class="lane gard" marker-end="url(#ar)" d="M385 445 C520 445 560 270 650 255"/>
+        <path class="lane read" marker-end="url(#ar)" d="M700 355 L700 415"/>
+        <path class="lane read" marker-end="url(#ar)" d="M625 445 L560 445"/>
+        <path class="lane read" marker-end="url(#ar)" d="M700 470 L700 505"/>
+        <path class="lane read" marker-end="url(#ar)" d="M430 470 C430 510 630 515 640 515"/>
+        <path class="lane read" d="M580 112 C600 70 820 70 820 300 L775 330" marker-end="url(#ar)"/>
+
+        <g class="node" data-k="ext"><rect x="20" y="35" width="150" height="50"/><text x="32" y="56">Extension / feed tiles</text><text class="k" x="32" y="72">summarizeVideo · import</text></g>
+        <g class="node" data-k="job"><rect x="20" y="100" width="150" height="50"/><text x="32" y="121">SummaryJob DO</text><text class="k" x="32" y="137">on complete → enqueue</text></g>
+        <g class="node" data-k="d1src"><rect x="20" y="200" width="150" height="50"/><text x="32" y="221">D1 · summaries</text><text class="k" x="32" y="237">+ transcript_segments</text></g>
+        <g class="node" data-k="q"><rect x="235" y="100" width="150" height="50"/><text x="247" y="121">Queue: wiki-ingest</text><text class="k" x="247" y="137">batch 10 · max_concurrency 8</text></g>
+        <g class="node" data-k="card"><rect x="430" y="100" width="150" height="50"/><text x="442" y="121">Card extractor</text><text class="k" x="442" y="137">claims · entities · topics</text></g>
+        <g class="node" data-k="resolve"><rect x="625" y="100" width="150" height="50"/><text x="637" y="121">Entity resolver</text><text class="k" x="637" y="137">Vectorize kNN + LLM judge</text></g>
+        <g class="node" data-k="page"><rect x="625" y="205" width="150" height="60"/><text x="637" y="226">WikiPage DO × N</text><text class="k" x="637" y="242">one per page · debounced</text><text class="k" x="637" y="256">editor agent rewrites</text></g>
+        <g class="node" data-k="d1wiki"><rect x="625" y="300" width="150" height="55"/><text x="637" y="321">D1 · wiki tables</text><text class="k" x="637" y="337">pages · claims · revisions</text><text class="k" x="637" y="350">FTS5 index</text></g>
+        <g class="node" data-k="vec"><rect x="800" y="280" width="90" height="45" transform="translate(-10,0)"/><text x="802" y="300">Vectorize</text><text class="k" x="802" y="315">claims+pages</text></g>
+        <g class="node" data-k="wf"><rect x="160" y="305" width="150" height="50"/><text x="172" y="326">Backfill Workflow</text><text class="k" x="172" y="342">enqueue → librarian → seed</text></g>
+        <g class="node" data-k="lib"><rect x="235" y="370" width="150" height="45" transform="translate(0,-45)"/><text x="247" y="345">Librarian agent</text><text class="k" x="247" y="360">taxonomy · page plan</text></g>
+        <g class="node" data-k="cron"><rect x="235" y="420" width="150" height="50"/><text x="247" y="441">Gardeners (Cron)</text><text class="k" x="247" y="457">merge · contradict · gaps</text></g>
+        <g class="node" data-k="ui"><rect x="625" y="420" width="150" height="50"/><text x="637" y="441">/wiki routes</text><text class="k" x="637" y="457">SSR from D1 · edge cache</text></g>
+        <g class="node" data-k="chat"><rect x="410" y="420" width="150" height="50"/><text x="422" y="441">WikiChat agent</text><text class="k" x="422" y="457">Agents SDK · tools</text></g>
+        <g class="node" data-k="review"><rect x="640" y="505" width="150" height="45"/><text x="652" y="524">Review queue</text><text class="k" x="652" y="539">proposals you approve</text></g>
+        <g class="node" data-k="or"><rect x="20" y="490" width="170" height="50"/><text x="32" y="511">OpenRouter</text><text class="k" x="32" y="527">all LLM calls (existing key)</text></g>
+        <g class="node" data-k="access"><rect x="20" y="410" width="170" height="50"/><text x="32" y="431">Cloudflare Access</text><text class="k" x="32" y="447">gates /wiki + /agents</text></g>
+      </svg>
+    </div>
+    <div class="card" id="detail"><h3>Click a box</h3><p>Each component shows what it does, the Cloudflare primitive behind it, and the model it calls.</p></div>
+  </div>
+</section>
+
+<!-- ============ PIPELINES ============ -->
+<section class="tab" id="flows">
+  <h2><span class="pill a">backfill</span> One-time: 1,114 sources → a wiki on day one</h2>
+  <div class="strip">
+    <div class="step"><span class="n">1</span><b>Segments</b><span>Re-fetch timestamped captions for videos (laptop <code>yt-summary.py</code>, since YouTube blocks CF IPs) → <code>POST /api/wiki/segments</code></span></div>
+    <div class="step"><span class="n">2</span><b>Fan-out</b><span>Workflow pages through D1 and enqueues 1,114 <code>{sourceId}</code> messages</span></div>
+    <div class="step"><span class="n">3</span><b>Cards</b><span>The queue consumer extracts claims, entities and topics as JSON-schema output. Runs in parallel.</span></div>
+    <div class="step"><span class="n">4</span><b>Librarian</b><span>One big-context call reads all entity and topic <i>names + counts</i> and proposes the page plan, merges and splits</span></div>
+    <div class="step"><span class="n">5</span><b>Seed pages</b><span>Fans out to WikiPage DOs. Each editor reads its claims and writes the page.</span></div>
+    <div class="step"><span class="n">6</span><b>Index</b><span>Embed claims and pages into Vectorize, build FTS5, render <code>index</code></span></div>
+  </div>
+  <p class="note">The Workflow checkpoints every step and retries on its own. If the extractor fails on video 640, only that message gets redelivered. Unverified estimate: about 2–4 hours wall-clock at 8 consumers in parallel.</p>
+
+  <h2><span class="pill t">live</span> On every new summary</h2>
+  <div class="strip">
+    <div class="step"><span class="n">1</span><b>Trigger</b><span><code>SummaryJob</code> finishes → <code>env.WIKI_INGEST.send({sourceId})</code></span></div>
+    <div class="step"><span class="n">2</span><b>Card</b><span>Same extractor as backfill</span></div>
+    <div class="step"><span class="n">3</span><b>Resolve</b><span>Each entity: Vectorize top-5 → LLM picks <i>existing / new / unsure</i>. Unsure → review queue</span></div>
+    <div class="step"><span class="n">4</span><b>Route</b><span>The router agent picks which pages this source changes (often 3–8) → <code>WikiPage.addClaims()</code></span></div>
+    <div class="step"><span class="n">5</span><b>Debounce</b><span>The page DO sets an alarm (10 min or 5 new claims) so 3 videos in a row become 1 rewrite</span></div>
+    <div class="step"><span class="n">6</span><b>Edit + validate</b><span>The editor rewrites the page. Code rejects unknown claim IDs or links, then saves a revision and re-embeds.</span></div>
+  </div>
+  <p class="note">The extension panel gets a "Added to wiki: 4 pages" pill once step 6 lands.</p>
+
+  <h2><span class="pill v">gardeners</span> Weekly, via Cron Trigger → Workflow</h2>
+  <div class="grid g4">
+    <div class="card"><h3>Merge proposer</h3><p>Finds entity pairs that look alike (vector distance plus shared sources) and asks for a merge, with evidence.</p></div>
+    <div class="card"><h3>Contradiction finder</h3><p>Across each page's claims: "A says X (2025), B says not-X (2026)." Writes a disagreements box or a proposal.</p></div>
+    <div class="card"><h3>Gap finder</h3><p>Concepts mentioned in 3+ sources with no page → proposes a new page with its claim list.</p></div>
+    <div class="card"><h3>Weekly digest</h3><p>"What changed in your wiki": new pages, shifted consensus. Shown on the wiki home.</p></div>
+  </div>
+  <p class="note">Gardeners never edit structure directly. They write <code>proposals</code>, and you approve or reject them in the Review queue. Low-risk changes (adding a citation, refreshing a summary) apply automatically.</p>
+
+  <h2><span class="pill">query</span> Chat</h2>
+  <div class="strip">
+    <div class="step"><span class="n">1</span><b>Ask</b><span>From the wiki or any page ("ask about this page" pins it as context)</span></div>
+    <div class="step"><span class="n">2</span><b>Search</b><span>Tool <code>search_wiki</code>: FTS5 + Vectorize hybrid over pages and claims</span></div>
+    <div class="step"><span class="n">3</span><b>Read</b><span>Tools <code>read_page</code>, <code>read_source(id, t)</code> for the raw transcript window</span></div>
+    <div class="step"><span class="n">4</span><b>Answer</b><span>Cites claim IDs, rendered as ▶ timestamp chips</span></div>
+    <div class="step"><span class="n">5</span><b>File back</b><span>"Save as page" turns the answer into a proposal. Good answers become part of the wiki.</span></div>
+  </div>
+</section>
+
+<!-- ============ UI ============ -->
+<section class="tab" id="ui">
+  <div class="mockbar">
+    <button data-m="home" class="on">Wiki home</button>
+    <button data-m="topic">Topic page</button>
+    <button data-m="source">Source page</button>
+    <button data-m="chat">Chat</button>
+    <button data-m="review">Review queue</button>
+  </div>
+  <div class="browser">
+    <div class="chrome"><span class="dots"><i></i><i></i><i></i></span><span class="url" id="url">summarizer.goldenoreo.workers.dev/wiki</span></div>
+
+    <!-- HOME -->
+    <div class="mock app on" id="m-home">
+      <aside class="side">
+        <div class="search">Search the wiki…  ⌘K</div>
+        <a class="on">Home</a><a>Topics <small>214</small></a><a>People <small>392</small></a><a>Companies <small>445</small></a><a>Sources <small>1,114</small></a>
+        <h4>Review</h4><a>Proposals <small style="color:var(--amber)">7</small></a>
+        <h4>Pinned</h4><a>Agent memory</a><a>AI coding agents</a><a>Distribution for solo founders</a>
+      </aside>
+      <div class="page">
+        <h1>Your wiki</h1>
+        <div class="meta">1,114 sources · 642 pages · last ingest 4 min ago</div>
+        <div class="box new"><h3>This week</h3>
+          <ul class="feed tight">
+            <li><b>Agent memory</b> got 3 new sources; consensus moved toward "files over vectors" <span class="cite">3 claims</span></li>
+            <li>New page <b>Context engineering</b>, proposed by gap finder from 6 sources</li>
+            <li><b>Disagreement</b> flagged on <b>AI & junior engineers</b>: Cowling vs. two newer talks</li>
+          </ul>
+        </div>
+        <h2>Biggest topics</h2>
+        <div class="tiles">
+          <div class="tile"><b>Agents</b><div class="c">122 sources · updated today</div><p>Harnesses beat models; the hard part is evals and memory, not tool calls.</p></div>
+          <div class="tile"><b>AI coding agents</b><div class="c">118 sources</div><p>Review, not generation, is the bottleneck; teams move to spec-first loops.</p></div>
+          <div class="tile"><b>Startups</b><div class="c">91 sources</div><p>Distribution beats product for solo builders; 3 talks dissent.</p></div>
+          <div class="tile"><b>Leadership</b><div class="c">73 sources</div><p>Lead by aligning on "why"; dial oversight down as people grow.</p></div>
+          <div class="tile"><b>Distributed systems</b><div class="c">19 sources</div><p>Remove coordination, don't buy faster hardware.</p></div>
+          <div class="tile"><b>Productivity</b><div class="c">67 sources</div><p>Externalize state; small loops; protect deep-work blocks.</p></div>
+        </div>
+        <h2>Recently added</h2>
+        <div class="srcrow"><div class="thumb" data-d="1:12:40"></div><div><b>Dropbox's Former Most Senior Eng — James Cowling</b><div class="faint">→ 6 pages updated · Distributed systems, Careers, Leadership…</div></div><span class="pill t">video</span></div>
+        <div class="srcrow"><div class="thumb" data-d="48:02"></div><div><b>Inside xAI: building Grok Imagine in 3 months</b><div class="faint">→ 4 pages updated · new person page: <i>proposed</i></div></div><span class="pill t">video</span></div>
+      </div>
+    </div>
+
+    <!-- TOPIC -->
+    <div class="mock app" id="m-topic">
+      <aside class="side">
+        <div class="search">Search the wiki…  ⌘K</div>
+        <a>Home</a><a class="on">Topics</a><a>People</a><a>Companies</a><a>Sources</a>
+        <h4>On this page</h4><a>Summary</a><a>Disagreements</a><a>Timeline</a><a>Sources <small>14</small></a><a>Related</a>
+      </aside>
+      <div class="page">
+        <div class="crumbs">Topics / AI / Agents /</div>
+        <h1>Agent memory</h1>
+        <div class="meta">14 sources · 61 claims · rewritten 2h ago by editor (rev 9) · <a>history</a> · <a>ask about this page</a></div>
+        <p>Practitioners have largely moved away from vector-database "memory" toward <b>plain files the agent reads and writes</b>: <code>CLAUDE.md</code>, wiki pages, progress logs <span class="cite">Cowling 41:10</span><span class="cite">Karpathy talk 12:34</span>. The argument is that files are inspectable, diffable and cheap, and today's models navigate them well at a few hundred documents <span class="cite">Chroma 08:52</span>.</p>
+        <p>The open problem is <b>what to forget</b>. Three sources describe consolidation passes, like a gardener, that compress logs into durable notes <span class="cite">LangChain 22:05</span><span class="cite">Dosu 15:40</span>; none report evals on this.</p>
+        <div class="box dis"><h3>Disagreements</h3>
+          <ul class="tight">
+            <li><b>Vectors still matter past ~10k docs</b>: Chroma (2026-03) <span class="cite">31:20</span> vs. "grep is enough" from two coding-agent talks <span class="cite">Anthropic 18:02</span><span class="cite">Cognition 44:11</span></li>
+          </ul>
+        </div>
+        <h2>Timeline</h2>
+        <div class="chips"><span class="chip"><b>2025-Q3</b> RAG default</span><span class="chip"><b>2026-Q1</b> CLAUDE.md / files</span><span class="chip"><b>2026-Q2</b> LLM-wiki pattern</span><span class="chip"><b>2026-Q3</b> consolidation passes</span></div>
+        <h2>Sources</h2>
+        <div class="srcrow"><div class="thumb" data-d="1:12:40"></div><div><b>James Cowling: building great systems</b><div class="faint">4 claims used · 2026-06-02</div></div><span class="btn">open</span></div>
+        <div class="srcrow"><div class="thumb" data-d="38:15"></div><div><b>Agent memory: LangChain × Dosu × Chroma</b><div class="faint">11 claims used · 2026-05-18</div></div><span class="btn">open</span></div>
+        <h2>Related</h2>
+        <div class="chips"><span class="chip">Context engineering</span><span class="chip">Evals</span><span class="chip">Claude Code</span><span class="chip">Harrison Chase</span></div>
+      </div>
+    </div>
+
+    <!-- SOURCE -->
+    <div class="mock app" id="m-source">
+      <aside class="side">
+        <div class="search">Search the wiki…  ⌘K</div>
+        <a>Home</a><a>Topics</a><a>People</a><a>Companies</a><a class="on">Sources</a>
+        <h4>Linked from</h4><a>Distributed systems</a><a>Careers</a><a>Leadership</a><a>AI & junior engineers</a><a>James Cowling</a><a>Convex</a>
+      </aside>
+      <div class="page">
+        <div class="crumbs">Sources / video /</div>
+        <h1>Dropbox's Former Most Senior Eng: Building Great Systems</h1>
+        <div class="meta">James Cowling · 1:12:40 · summarized 2026-06-02 · <a>open summary</a> · <a>poster</a> · <a>transcript</a></div>
+        <div class="grid g2" style="grid-template-columns:1.4fr 1fr">
+          <div>
+            <h2 style="margin-top:0">Claims</h2>
+            <div class="claim"><span class="ts">▶ 04:12</span><span>Simple systems are harder to design than complex ones and scale better across years. <span class="pill">principle</span></span></div>
+            <div class="claim"><span class="ts">▶ 17:40</span><span>Performance comes from removing coordination between nodes, not faster hardware. <span class="pill">claim</span></span></div>
+            <div class="claim"><span class="ts">▶ 29:03</span><span>Magic Pocket beat S3 cost using SMR disks and workload-specific erasure coding. <span class="pill">fact</span></span></div>
+            <div class="claim"><span class="ts">▶ 41:10</span><span>LLMs commoditize junior tasks but can't synthesize wisdom; avoid the "passivity trap". <span class="pill a">contested</span></span></div>
+            <div class="claim"><span class="ts">▶ 58:22</span><span>Stay 3+ years in a role to own the consequences of your decisions. <span class="pill">advice</span></span></div>
+          </div>
+          <div>
+            <div class="box" style="margin-top:0"><h3>Entities</h3><div class="chips"><span class="chip">James Cowling</span><span class="chip">Dropbox</span><span class="chip">Convex</span><span class="chip">AWS S3</span><span class="chip">TigerBeetle</span></div></div>
+            <div class="box"><h3>Pages this source changed</h3><ul class="tight"><li>Distributed systems (+3 claims)</li><li>Careers (+2)</li><li>AI & junior engineers (+1, <span class="warn">disagreement</span>)</li></ul></div>
+            <div class="box"><h3>Transcript window</h3><p class="mono faint">[41:02] …and the thing is the models can do the junior work now, but what they can't do is give you the wisdom of having run the system for six years…</p></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CHAT -->
+    <div class="mock app withchat" id="m-chat">
+      <aside class="side">
+        <div class="search">Search the wiki…  ⌘K</div>
+        <a>Home</a><a class="on">Topics</a><a>People</a><a>Companies</a><a>Sources</a>
+      </aside>
+      <div class="page" style="opacity:.55">
+        <div class="crumbs">Topics / AI /</div><h1>AI coding agents</h1><div class="meta">118 sources · 402 claims</div>
+        <p>Review, not generation, is now the bottleneck. Teams are moving toward spec-first loops and smaller PRs…</p>
+      </div>
+      <div class="chat">
+        <div class="hd"><b>Ask your wiki</b><span class="faint">context: AI coding agents ✕</span></div>
+        <div class="msgs">
+          <div class="me">Who argues against letting agents write most of the code, and what's their best argument?</div>
+          <div class="tool">search_wiki("against agents writing code") → 3 pages, 9 claims</div>
+          <div class="tool">read_source(cowling, 41:00–42:30)</div>
+          <div class="ai">Three sources push back, from different angles:
+            <ol style="margin:6px 0 0 16px;padding:0">
+              <li><b>Skill atrophy.</b> Cowling: doing the reps yourself is how judgment forms ("passivity trap") <span class="cite">41:10</span></li>
+              <li><b>Review cost.</b> Two talks measured review time growing faster than output <span class="cite">Cognition 44:11</span></li>
+              <li><b>Maintainability.</b> "Working ≠ maintainable" <span class="cite">Cowling 52:30</span></li>
+            </ol>
+            <div style="margin-top:8px">Strongest: #2, because it's measured; the others are opinion.</div>
+            <div style="margin-top:8px"><span class="btn ok">Save as page</span> <span class="btn">Open sources</span></div>
+          </div>
+        </div>
+        <div class="composer">Ask a follow-up…</div>
+      </div>
+    </div>
+
+    <!-- REVIEW -->
+    <div class="mock app" id="m-review">
+      <aside class="side">
+        <div class="search">Search the wiki…  ⌘K</div>
+        <a>Home</a><a>Topics</a><a>People</a><a>Companies</a><a>Sources</a>
+        <h4>Review</h4><a class="on">Proposals <small style="color:var(--amber)">7</small></a><a>Auto-applied <small>23</small></a><a>Rejected <small>4</small></a>
+      </aside>
+      <div class="page">
+        <h1>Review queue</h1>
+        <div class="meta">Agents propose and you decide. Structural changes wait here; small fixes apply on their own.</div>
+        <div class="prop"><div><span class="pill v">merge</span> <b>"Sam A." → Sam Altman</b><div class="faint">merge proposer · 4 shared sources · similarity 0.94</div><div class="diff"><span class="m">- people/sam-a (2 sources)</span><br><span class="p">+ people/sam-altman (31 → 33 sources)</span></div></div><div><span class="btn ok">Approve</span> <span class="btn no">Reject</span></div></div>
+        <div class="prop"><div><span class="pill a">split</span> <b>Agents → Agent memory · Agent evals · Agent harnesses</b><div class="faint">librarian · page has 122 sources, 3 clear clusters</div></div><div><span class="btn ok">Approve</span> <span class="btn">Edit</span> <span class="btn no">Reject</span></div></div>
+        <div class="prop"><div><span class="pill r">contradiction</span> <b>Vectors vs. files for memory past 10k docs</b><div class="faint">contradiction finder · adds a Disagreements box to Agent memory</div></div><div><span class="btn ok">Approve</span> <span class="btn no">Reject</span></div></div>
+        <div class="prop"><div><span class="pill t">new page</span> <b>Context engineering</b><div class="faint">gap finder · mentioned in 6 sources, 17 claims</div></div><div><span class="btn ok">Approve</span> <span class="btn no">Reject</span></div></div>
+        <div class="prop"><div><span class="pill">entity</span> <b>"Gemini": the Google model or the crypto exchange?</b><div class="faint">resolver was unsure · source: "Crypto in 2026" @ 12:40</div></div><div><span class="btn">Google model</span> <span class="btn">Exchange</span></div></div>
+      </div>
+    </div>
+  </div>
+  <p class="note">Mockups use real titles and counts from the July wiki where possible. Summary text is illustrative.</p>
+</section>
+
+<!-- ============ DATA ============ -->
+<section class="tab" id="data">
+  <h2>New D1 tables (migration <code>0002_wiki.sql</code>)</h2>
+  <table>
+    <tr><th>Table</th><th>Key columns</th><th>Why</th></tr>
+    <tr><td><code>transcript_segments</code></td><td>source_id, start_s, text</td><td>Timestamped citations. Today D1 has only flat text.</td></tr>
+    <tr><td><code>cards</code></td><td>source_id, model, json, hash, created_at</td><td>The extractor's output. The hash skips sources that haven't changed.</td></tr>
+    <tr><td><code>claims</code></td><td>id, source_id, start_s, text, kind (fact/claim/advice/quote), stance</td><td>The unit every page cites. Vectorize id = claim id.</td></tr>
+    <tr><td><code>entities</code></td><td>id, kind (person/org/product/concept), name, aliases[], page_id</td><td>The canonical record for each name, so duplicates resolve to one</td></tr>
+    <tr><td><code>claim_entities</code></td><td>claim_id, entity_id</td><td>Join table. Hub pages are just queries over it.</td></tr>
+    <tr><td><code>pages</code></td><td>id, slug, kind, title, body_md, rev, dirty, updated_at</td><td>The current text of every page</td></tr>
+    <tr><td><code>page_claims</code></td><td>page_id, claim_id, role (cited/pending)</td><td>What the editor may cite. Pending = not yet written into the page.</td></tr>
+    <tr><td><code>page_revisions</code></td><td>page_id, rev, body_md, author (agent/you), reason</td><td>History plus undo. Doubles as the "what changed" feed.</td></tr>
+    <tr><td><code>proposals</code></td><td>id, kind, payload_json, status, evidence</td><td>Review queue</td></tr>
+    <tr><td><code>pages_fts</code></td><td>FTS5(title, body_md)</td><td>Keyword half of hybrid search</td></tr>
+  </table>
+  <h2>New bindings in <code>wrangler.jsonc</code></h2>
+  <div class="grid g3">
+    <div class="card"><h3>Queues</h3><p><code>WIKI_INGEST</code> (producer + consumer), DLQ <code>wiki-ingest-dlq</code></p></div>
+    <div class="card"><h3>Workflows</h3><p><code>WIKI_BACKFILL</code>, <code>WIKI_GARDEN</code></p></div>
+    <div class="card"><h3>Durable Objects</h3><p><code>WikiPage</code> (SQLite), <code>WikiChat</code> (Agents SDK)</p></div>
+    <div class="card"><h3>Vectorize</h3><p><code>WIKI_VEC</code>, 1024-dim, metadata: kind, source_id, page_id, start_s</p></div>
+    <div class="card"><h3>Workers AI</h3><p><code>AI</code> for embeddings (<code>@cf/baai/bge-m3</code>), so no extra provider</p></div>
+    <div class="card"><h3>Cron Triggers</h3><p><code>"0 17 * * 0"</code> weekly gardeners (Sun 3am Sydney)</p></div>
+  </div>
+  <h2>Card schema (extractor output)</h2>
+<pre class="card mono" style="white-space:pre-wrap;color:var(--ink-dim)">{
+  "gist": "1–2 sentences",
+  "claims": [{ "t": 2470, "text": "…", "kind": "claim|fact|advice|quote", "entities": ["James Cowling"], "topics": ["ai-careers"] }],
+  "entities": [{ "name": "James Cowling", "kind": "person", "context": "co-founder/CTO of Convex" }],
+  "topics": ["distributed-systems", "careers"]
+}</pre>
+  <h2>Validation code enforces (not the model)</h2>
+  <ul class="tight">
+    <li>Every <code>[[claim:id]]</code> in a page exists and belongs to that page's <code>page_claims</code>.</li>
+    <li>Every <code>[[page:slug]]</code> link resolves. Unknown links are stripped and logged as gap candidates.</li>
+    <li>A rewrite can't drop more than 30% of a page's citations without becoming a proposal.</li>
+    <li>Timestamps must fall within the source's duration.</li>
+  </ul>
+</section>
+
+<!-- ============ DECISIONS ============ -->
+<section class="tab" id="dec">
+  <h2>Which model does which job (via OpenRouter)</h2>
+  <table>
+    <tr><th>Job</th><th>Volume</th><th>Model tier</th><th>Why</th></tr>
+    <tr><td>Card extraction</td><td>1 per source</td><td>Fast tier (Haiku / Flash class)</td><td>High volume, structured output, schema-checked</td></tr>
+    <tr><td>Entity resolve</td><td>~10 per source</td><td>Fast tier</td><td>Small yes/no calls with candidates provided</td></tr>
+    <tr><td>Page editor</td><td>per dirty page, debounced</td><td>Sonnet class</td><td>Where synthesis quality shows</td></tr>
+    <tr><td>Librarian / gardeners</td><td>once / weekly</td><td>Opus class, high effort</td><td>Rare, big-context judgment calls</td></tr>
+    <tr><td>Chat</td><td>on demand</td><td>Your picker default</td><td>Same model list as the dashboard</td></tr>
+  </table>
+  <h2>Cost (estimates, not measured)</h2>
+  <div class="grid g3">
+    <div class="card"><h3>Backfill</h3><p>~27M tokens into the extractor + ~15M into the editors. Roughly <b>$30–120</b> once, depending on tiers.</p></div>
+    <div class="card"><h3>Per new video</h3><p>1 card + ~5 page rewrites ≈ <b>$0.05–0.25</b></p></div>
+    <div class="card"><h3>Platform</h3><p>Queues, Workflows, Vectorize, D1 at this size: likely within Workers Paid ($5/mo) included usage</p></div>
+  </div>
+  <h2>Rejected options</h2>
+  <table>
+    <tr><th>Option</th><th>Why not</th></tr>
+    <tr><td>Claude subscription (<code>claude -p</code>) in a Cloudflare Container</td><td>Unattended runs on subscription credentials are a policy gray area, and Containers add a laptop-like box to babysit. Possible later as a manual "turbo backfill" that posts cards to <code>/api/wiki/cards</code>.</td></tr>
+    <tr><td>Markdown in R2 as source of truth</td><td>No transactional updates, and hub pages become hand-kept. D1 keeps it; R2 holds only an Obsidian export zip.</td></tr>
+    <tr><td>AI Search / AutoRAG only</td><td>That's retrieval, not compilation, so nothing builds up between questions. Vectorize is one tool inside chat.</td></tr>
+    <tr><td>Agent edits pages directly, no DO</td><td>Parallel ingests race on the same page. The DO-per-page queue fixes that for free.</td></tr>
+    <tr><td>Static site (Quartz on Pages)</td><td>Needs a build step per update, and chat would live elsewhere. SSR from D1 is always current.</td></tr>
+  </table>
+  <h2>Build order</h2>
+  <ol>
+    <li>Migration + card extractor + queue; run it on 20 sources and check quality and cost.</li>
+    <li>WikiPage DO + editor + validation; render <code>/wiki/:slug</code>.</li>
+    <li>Backfill Workflow + librarian; run all 1,114.</li>
+    <li>Hook <code>SummaryJob</code> → queue (live).</li>
+    <li>WikiChat + review queue + gardeners. Put Access on <code>/wiki</code> before step 2 ships.</li>
+  </ol>
+  <p class="note warn">Open risk: timestamped segments. D1 stores flat text today. Without segments, citations stop at the video, not the moment. Backfilling segments needs the laptop native host, because YouTube blocks Cloudflare IPs.</p>
+</section>
+</main>
+
+<script>
+const D = {
+  ext:["Extension / feed tiles","Existing entry points. Nothing changes here except a new 'Added to wiki' pill when ingest lands."],
+  job:["SummaryJob DO (existing)","After it saves the generation to D1, one new line: <code>env.WIKI_INGEST.send({sourceId})</code>. The wiki never slows a summary down."],
+  d1src:["D1 · summaries (existing)","1,114 rows today. Adds <code>transcript_segments</code> so claims can cite ▶ 12:34."],
+  q:["Queue · wiki-ingest","Shared by live and backfill. Retries + dead-letter queue. <code>max_concurrency</code> caps OpenRouter spend and rate limits."],
+  card:["Card extractor","One call per source, fast-tier model, JSON-schema output: claims with timestamps, entities, topics. Cached by content hash."],
+  resolve:["Entity resolver","For each entity: Vectorize nearest 5 existing → small LLM judge picks existing / new / unsure. Unsure goes to the Review queue instead of guessing."],
+  page:["WikiPage Durable Object","One per page. Collects incoming claims, debounces with an alarm, then runs the editor agent: rewrite with summary, disagreements, timeline. Edits are applied one at a time, so there are no races."],
+  d1wiki:["D1 · wiki tables","pages, claims, entities, revisions, proposals + FTS5. Source of truth for everything you read."],
+  vec:["Vectorize","Embeddings for claims and pages (Workers AI bge-m3). Used by the resolver and by chat's hybrid search."],
+  wf:["Backfill Workflow","Durable, resumable. Enqueue all sources → wait for cards → run librarian → seed pages → build index. Safe to re-run."],
+  lib:["Librarian agent","One big-context Opus-class call over all entity/topic names + counts. Designs the taxonomy, page list, merges and splits. The 'intelligence' step a script can't do."],
+  cron:["Gardeners (Cron → Workflow)","Weekly: merge proposer, contradiction finder, gap finder, digest. They write proposals, never silent structural edits."],
+  ui:["/wiki routes","Server-rendered from D1 by the same Worker, cached at the edge, purged when a page's revision changes. Lives next to the dashboard."],
+  chat:["WikiChat agent","Same Agents SDK pattern as SummaryChat. Tools: search_wiki, read_page, read_source(id,t), propose_page. Answers cite claim ids."],
+  review:["Review queue","Approve / reject merges, splits, new pages, contradictions. Your judgment stays where it matters; agents do the rest."],
+  or:["OpenRouter","Existing key and model list. Fast tier for volume, Sonnet for editing, Opus for librarian/gardeners."],
+  access:["Cloudflare Access","Email one-time code on /wiki and /agents/wiki-chat. Static assets are public today, so this is required before launch."]
+};
+document.querySelectorAll('svg .node').forEach(n=>n.addEventListener('click',()=>{
+  document.querySelectorAll('svg .node').forEach(x=>x.classList.remove('sel'));
+  n.classList.add('sel'); const [t,b]=D[n.dataset.k];
+  document.getElementById('detail').innerHTML=`<h3>${t}</h3><p>${b}</p>`;
+}));
+document.querySelectorAll('nav.tabs button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('nav.tabs button,section.tab').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on'); document.getElementById(b.dataset.t).classList.add('on');
+});
+const URLS={home:'/wiki',topic:'/wiki/topic/agent-memory',source:'/wiki/source/3XkmNSuHFmY',chat:'/wiki/topic/ai-coding-agents?chat=1',review:'/wiki/review'};
+document.querySelectorAll('.mockbar button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.mockbar button,.mock').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on'); document.getElementById('m-'+b.dataset.m).classList.add('on');
+  document.getElementById('url').textContent='summarizer.goldenoreo.workers.dev'+URLS[b.dataset.m];
+});
+</script>
+</body>
+</html>
