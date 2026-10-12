@@ -63,9 +63,14 @@ export async function wikiApi(req: Request, env: Env, p: string, url: URL, json:
       ).all()
       : await db.prepare(
         `SELECT slug, title, kind, summary, source_count, updated_at FROM pages
-         WHERE ${kind === 'all' ? '1' : 'kind = ?'} ORDER BY source_count DESC LIMIT 2000`,
+         WHERE ${kind === 'all' ? '1' : 'kind = ?'} AND (claim_count > 0 OR kind = 'note' OR body_md IS NULL)
+         ORDER BY source_count DESC LIMIT 2000`,
       ).bind(...(kind === 'all' ? [] : [kind])).all();
-    const counts = await db.prepare('SELECT kind, COUNT(*) n FROM pages GROUP BY kind').all();
+    // Entity pages whose sources only mention the name in passing have nothing cited; keep
+    // them reachable by URL but out of the lists until a source says something about them.
+    const counts = await db.prepare(
+      `SELECT kind, COUNT(*) n FROM pages WHERE claim_count > 0 OR kind = 'note' OR body_md IS NULL GROUP BY kind`,
+    ).all();
     return json({ pages: rows.results, counts: counts.results });
   }
 
