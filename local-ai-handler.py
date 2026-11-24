@@ -38,7 +38,7 @@ TRANSCRIPTS_DIR = Path.home() / "yt-transcripts"
 # Edit that file to change them — no code change or native-host restart required.
 CONFIG_PATH = Path(__file__).resolve().parent / "ai-config.json"
 OPEN_IN_CC_DEFAULTS = {
-    "model": "claude-opus-4-8",
+    "model": "claude-fable-5-1",
     "reasoning": "max",
     "systemPrompt": "You are a transcript summarizer",
     "prompt": "Read the transcript at {ref}, summarize it and extract the key insights.",

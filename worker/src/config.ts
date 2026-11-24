@@ -1,4 +1,4 @@
-// Port of ai-config.json. models[0] is the "best" default pick (Opus 4.8); alternateModels
+// Port of ai-config.json. models[0] is the "best" default pick (Opus 5.5); alternateModels
 // define no prompt of their own, so switching model is a pure model swap on the same
 // instructions — same contract the picker had locally.
 
@@ -14,11 +14,11 @@ export interface ModelDef {
 
 export const MODELS: ModelDef[] = [
   {
-    id: 'opus',
-    name: 'Opus 4.8',
-    icon: '🟣',
-    model: 'anthropic/claude-opus-4.8',
-    reasoning: { max_tokens: 10000 },
+    id: 'opus-5-5',
+    name: 'Opus 5.5',
+    icon: 'claude',
+    model: 'anthropic/claude-opus-5.5',
+    reasoning: { effort: 'high' },
     max_tokens: 16000,
     prompt: 'Summarize concisely and extract key insights. Start with a TLDR. Use markdown:\n\n',
   },
@@ -26,9 +26,25 @@ export const MODELS: ModelDef[] = [
 
 export const ALTERNATE_MODELS: ModelDef[] = [
   {
+    id: 'fable',
+    name: 'Fable 5.1',
+    icon: 'claude',
+    model: 'anthropic/claude-fable-5.1',
+    reasoning: { effort: 'high' },
+    max_tokens: 16000,
+  },
+  {
+    id: 'opus',
+    name: 'Opus 4.8',
+    icon: 'claude',
+    model: 'anthropic/claude-opus-4.8',
+    reasoning: { effort: 'high' },
+    max_tokens: 16000,
+  },
+  {
     id: 'gpt',
     name: 'GPT-5.6 Sol',
-    icon: '🤖',
+    icon: 'openai',
     model: 'openai/gpt-5.6-sol',
     reasoning: { effort: 'high' },
     max_tokens: 8000,
@@ -36,14 +52,14 @@ export const ALTERNATE_MODELS: ModelDef[] = [
   {
     id: 'sonnet',
     name: 'Sonnet 5',
-    icon: '🔷',
+    icon: 'claude',
     model: 'anthropic/claude-sonnet-5',
     max_tokens: 8000,
   },
   {
     id: 'gpt-pro',
     name: 'GPT-5.6 Sol Pro',
-    icon: '🧠',
+    icon: 'openai',
     model: 'openai/gpt-5.6-sol-pro',
     reasoning: { effort: 'high' },
     max_tokens: 8000,
@@ -53,6 +69,14 @@ export const ALTERNATE_MODELS: ModelDef[] = [
 export const DEFAULT_PROMPT =
   'Summarize concisely. Start with TLDR, then a tweetable one-liner. Be direct. ' +
   "No contrastive framing—don't define things by what they aren't. Use markdown:\n\n";
+
+// "Chat with transcript" mode: no summary up front. This is the system turn the conversation
+// starts from; the source text is appended after it, and the user's first message is the
+// first real turn.
+export const CHAT_PROMPT =
+  'You are helping the user talk through a YouTube video. Its full transcript is below. ' +
+  'Answer from the transcript; when it has timestamps, cite the approximate time. ' +
+  "If the video doesn't cover something, say so before adding outside knowledge. Be direct. Use markdown.";
 
 const ALL = [...MODELS, ...ALTERNATE_MODELS];
 
