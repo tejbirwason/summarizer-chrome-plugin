@@ -192,6 +192,7 @@ export default {
         const b = (await req.json()) as {
           url: string; title?: string; kind?: 'video' | 'page';
           videoId?: string; text: string; modelId?: string; prompt?: string; noPoster?: boolean;
+          chat?: boolean;
         };
         if (!b.url || !b.text?.trim()) return json({ error: 'url and text required' }, { status: 400 }, origin);
 
@@ -207,6 +208,7 @@ export default {
         const res = await stub.start({
           id, url: b.url, title: b.title ?? b.url, kind: b.kind ?? 'page',
           videoId: b.videoId, source: b.text, modelId, prompt: b.prompt, noPoster: b.noPoster,
+          chat: b.chat,
         });
         return json(res, {}, origin);
       }
@@ -222,8 +224,8 @@ export default {
           return stub.fetch(new Request(`https://do/stream`, { headers: req.headers, signal: req.signal }));
         }
         if (sub === '/followup' && req.method === 'POST') {
-          const { question } = (await req.json()) as { question: string };
-          return json(await stub.followup(question), {}, origin);
+          const { question, modelId } = (await req.json()) as { question: string; modelId?: string };
+          return json(await stub.followup(question, modelId), {}, origin);
         }
         if (sub === '/regenerate' && req.method === 'POST') {
           const { modelId, prompt } = (await req.json()) as { modelId: string; prompt?: string };

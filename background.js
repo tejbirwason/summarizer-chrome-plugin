@@ -210,15 +210,19 @@ function ensureModel(job, modelId) {
   return job.models[modelId];
 }
 
-function newJob({ url, fullUrl, title, sourceText, isTranscript, prompt, videoId, noPoster }) {
+function newJob({ url, fullUrl, title, sourceText, isTranscript, prompt, videoId, noPoster, mode }) {
   return {
     url,                                   // normalized (origin+pathname) — the storage key body
     fullUrl: fullUrl || url,               // exact URL, for "open page" links in history
     title: title || '',
-    sourceText: (sourceText || '').slice(0, 120000),  // raw text/transcript, for regenerate & prompt-edit
+    // Raw text/transcript, for regenerate & prompt-edit. This is also what the Worker gets, so
+    // the cap only guards D1's 2 MB value limit (600k chars ≤ 1.8 MB even at 3 bytes/char,
+    // ~10+ hours of speech). The old 120k cap silently cut the end off ~2h+ videos.
+    sourceText: (sourceText || '').slice(0, 600000),
     isTranscript: Boolean(isTranscript),
     videoId: videoId || '',                // set for YouTube — join key for the generated poster
     noPoster: Boolean(noPoster),           // "quick summary" — tells the Worker to skip the infographic
+    mode: mode || 'summary',               // 'chat' = transcript loaded as context, no summary generated
     prompt: prompt || '',                  // the (possibly user-edited) summarization instruction
     activeModelId: null,                   // model currently shown / most recently generated
     models: {},                            // modelId -> per-model slot
@@ -311,8 +315,9 @@ async function streamModel(job, tab, modelId, { isFollowup, prompt } = {}) {
     // survive this tab (or this whole service worker) going away.
     if (isFollowup) {
       const last = m.messages[m.messages.length - 1];
+      // modelId lets a chat switch model mid-thread; the Worker copies the conversation over.
       await api(`/api/job/${jobId}/followup`, { method: 'POST',
-        body: JSON.stringify({ question: last?.content ?? '' }) });
+        body: JSON.stringify({ question: last?.content ?? '', modelId }) });
     } else if (job.startedRemote) {
       await api(`/api/job/${jobId}/regenerate`, { method: 'POST',
         body: JSON.stringify({ modelId, prompt: prompt ?? job.prompt }) });
@@ -422,6 +427,39 @@ function startSummary({ url, title, sourceText, isTranscript, videoId, tab, mode
   persistJob(nurl);   // persist at once so an in-progress summary shows in history immediately
 }
 
+// Open a "chat with transcript" job: the transcript becomes the conversation's context and NO
+// summary is generated. The Worker seeds the conversation without calling the model; the user's
+// first question then goes through handleFollowup like any follow-up.
+async function startChat({ url, title, sourceText, videoId, tab, modelId }) {
+  const nurl = normUrl(url);
+  const model = findModel(modelId) || aiConfig.models[0];
+
+  const job = newJob({ url: nurl, fullUrl: url, title, sourceText, isTranscript: true, prompt: '', videoId, noPoster: true, mode: 'chat' });
+  jobs[nurl] = job;
+  const m = ensureModel(job, model.id);
+  // Index 0 is the internal context turn the panel never renders — same slot a summary's
+  // instruction+source turn occupies.
+  m.messages = [{ role: 'user', content: buildUserContent('', job) }];
+  job.activeModelId = model.id;
+
+  await api('/api/summarize', { method: 'POST', body: JSON.stringify({
+    url, title, kind: 'video', videoId, text: sourceText, modelId: model.id, chat: true,
+  }) });
+  job.startedRemote = true;
+  m.complete = true;
+  await persistJob(nurl);
+  await safeSend(tab, { action: 'chatReady', url: nurl, modelId: model.id, usedModel: metaOf(model), ...sourceInfo(job) });
+}
+
+// What the chat panel's "Transcript loaded" card shows.
+function sourceInfo(job) {
+  const text = job.sourceText || '';
+  return {
+    sourceWords: text ? text.trim().split(/\s+/).length : 0,
+    sourcePreview: text.slice(0, 280)
+  };
+}
+
 // Regenerate the active summary with a (possibly different) model and/or a (possibly edited)
 // prompt. Reuses the job's stored source text.
 async function handleRegenerate(request, tab) {
@@ -434,8 +472,10 @@ async function handleRegenerate(request, tab) {
 
   const model = findModel(request.modelId) || findModel(job.activeModelId) || aiConfig.models[0];
   const modelId = model.id;
+  // A chat job stores no prompt, so this falls through to the default summary instruction.
   const prompt = (request.prompt != null && request.prompt !== '') ? request.prompt : (job.prompt || aiConfig.defaultPrompt);
   job.prompt = prompt;
+  job.mode = 'summary';   // "Summarize instead" turns a chat into a normal summary
 
   const m = ensureModel(job, modelId);
   m.messages = [{ role: 'user', content: buildUserContent(prompt, job) }];
@@ -456,7 +496,11 @@ async function handleFollowup(request, tab) {
   if (!job) return;
 
   const modelId = findModel(request.modelId)?.id || job.activeModelId || defaultModelId();
+  const prev = job.models[job.activeModelId];
   const m = ensureModel(job, modelId);
+  // Switching model mid-conversation (chat mode's picker): continue the same thread on the new
+  // model, mirroring what the Worker does with its copy.
+  if (modelId !== job.activeModelId && prev) m.messages = [...prev.messages];
   m.messages.push({ role: 'user', content: request.question });
   m.streaming = '';
   m.inProgress = true;
@@ -487,6 +531,8 @@ async function handleGetPageState(request, sendResponse) {
     isTranscript: job.isTranscript,
     videoId: job.videoId,
     hasSource: Boolean(job.sourceText),
+    mode: job.mode || 'summary',
+    ...sourceInfo(job),
     models: job.models,
     timestamp: job.timestamp
   });
@@ -512,6 +558,7 @@ async function handleListSummaries(sendResponse) {
         snippet: (summaryMsg?.content || '').replace(/[#*`>_]/g, '').slice(0, 140).trim(),
         videoId: v.videoId,
         isTranscript: v.isTranscript,
+        mode: v.mode || 'summary',
         inProgress: Boolean(am?.inProgress)
       };
     })
@@ -572,7 +619,7 @@ async function getVideoTranscriptAndSummarize(request, tab) {
   // Create + persist a placeholder job right away (before the transcript exists) so the item
   // shows up in history immediately as "generating", and open the panel in a "fetching" state so
   // there's no dead time between the click and visible feedback.
-  const early = newJob({ url: nurl, fullUrl: url, title, sourceText: '', isTranscript: true, prompt, videoId, noPoster: request.noPoster });
+  const early = newJob({ url: nurl, fullUrl: url, title, sourceText: '', isTranscript: true, prompt, videoId, noPoster: request.noPoster, mode: request.chat ? 'chat' : 'summary' });
   const em = ensureModel(early, model.id);
   em.inProgress = true;
   early.activeModelId = model.id;
@@ -587,7 +634,8 @@ async function getVideoTranscriptAndSummarize(request, tab) {
     prompt,
     usedModel: metaOf(model),
     config: aiConfig,
-    phase: 'transcript'
+    phase: 'transcript',
+    mode: request.chat ? 'chat' : 'summary'
   });
 
   try {
@@ -603,6 +651,10 @@ async function getVideoTranscriptAndSummarize(request, tab) {
       title = await resolveYoutubeTitle(videoId, [request.title, tab?.title, title]);
     }
     // Replaces the placeholder job for this URL with the real one (same key), now with source.
+    if (request.chat) {
+      await startChat({ url, title, sourceText: transcript, videoId, tab, modelId: model.id });
+      return;
+    }
     startSummary({ url, title, sourceText: transcript, isTranscript: true, videoId, tab, modelId: model.id, prompt, noPoster: request.noPoster });
   } catch (error) {
     console.error('Error fetching video transcript:', error);
@@ -759,6 +811,14 @@ function handleRequest(request, sender, sendResponse) {
       .then(([modelId, prompt]) => {
         getVideoTranscriptAndSummarize({ ...request, modelId, prompt }, tab);
       });
+    return true;
+  }
+
+  // Same transcript fetch as summarizeVideo, but opens a chat instead of generating a summary.
+  if (request.action === 'chatVideo') {
+    resolvePreferredModel(request.modelId).then((modelId) => {
+      getVideoTranscriptAndSummarize({ ...request, modelId, chat: true }, tab);
+    });
     return true;
   }
 

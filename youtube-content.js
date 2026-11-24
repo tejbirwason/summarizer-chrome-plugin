@@ -91,21 +91,25 @@ function createSummaryButton() {
   ['click', 'dblclick', 'mousedown'].forEach(type =>
     container.addEventListener(type, e => e.stopPropagation()));
 
-  function makeButton(id, emoji, bg, hoverBg) {
+  // "Glass mono": translucent dark circles with white line icons, like YouTube's own player
+  // controls, so they sit on the video without fighting it. Hover turns the icon + ring teal.
+  const GLASS_BORDER = 'rgba(255,255,255,0.14)';
+  const HOVER = '#5be4c8';
+  function makeButton(id, icon) {
     const btn = document.createElement('button');
     btn.id = id;
-    btn.innerHTML = emoji;
+    btn.innerHTML = icon;
     btn.style.cssText = `
-      width: 44px; height: 44px; border-radius: 50%; background: ${bg}; color: white;
-      border: none; cursor: pointer; font-size: 20px; display: flex; align-items: center;
-      justify-content: center; transition: background-color 0.2s, opacity 0.2s;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.2); position: relative;
+      width: 40px; height: 40px; border-radius: 50%; background: rgba(15,15,15,0.6); color: #fff;
+      border: 1px solid ${GLASS_BORDER}; cursor: pointer; font-size: 18px; display: flex; align-items: center;
+      justify-content: center; transition: color 0.15s, border-color 0.15s, opacity 0.2s;
+      backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.25); position: relative; padding: 0;
     `;
-    btn.onmouseover = () => { if (!btn.disabled) btn.style.background = hoverBg; };
-    btn.onmouseout = () => { if (!btn.disabled) btn.style.background = bg; };
+    btn.onmouseover = () => { if (!btn.disabled) { btn.style.color = HOVER; btn.style.borderColor = HOVER; } };
+    btn.onmouseout = () => { btn.style.color = '#fff'; btn.style.borderColor = GLASS_BORDER; };
 
-    btn._emoji = emoji;
-    btn._bg = bg;
+    btn._emoji = icon;
     btn.setLoading = (loading) => {
       btn.disabled = loading;
       btn.style.opacity = loading ? '0.7' : '1';
@@ -118,10 +122,14 @@ function createSummaryButton() {
   // "quick summary": same summary, but it tells the Worker to skip the infographic — faster,
   // and no fal cost. Both scrape the transcript here in the page (the Worker can't — YouTube
   // blocks the whole cloud ASN) and hand it to the background; only the noPoster flag differs.
-  const summarizeBtn = makeButton('yt-summarize-btn', '✨', '#5C5CFF', '#4A4AD9');
+  // 💬 opens the panel with the transcript loaded as context and generates nothing — you just
+  // talk to the video. Same transcript fetch; the background starts a chat job instead.
+  const summarizeBtn = makeButton('yt-summarize-btn', CS_ICONS.sparkles);
   summarizeBtn.title = 'Summarize + infographic (cloud)';
-  const quickBtn = makeButton('yt-quick-btn', '⚡', '#2f8f7f', '#26766a');
+  const quickBtn = makeButton('yt-quick-btn', CS_ICONS.zap);
   quickBtn.title = 'Quick summary — no infographic';
+  const chatBtn = makeButton('yt-chat-btn', CS_ICONS.chat);
+  chatBtn.title = 'Chat with the transcript — no summary';
 
   // Real video title for history/sidebar. document.title often still says "YouTube" on SPA
   // nav, and the watch-page H1 selector has churned across Polymer / view-model layouts.
@@ -157,7 +165,7 @@ function createSummaryButton() {
     return '';
   }
 
-  const runVideoSummary = async (btn, noPoster) => {
+  const runVideoSummary = async (btn, noPoster, chat) => {
     const videoId = new URLSearchParams(window.location.search).get('v');
     if (!videoId) return;
     btn.setLoading(true);
@@ -168,12 +176,16 @@ function createSummaryButton() {
     // message back into this tab for the DOM-panel scrape (yt-transcript.js). Failures surface
     // through the normal summaryError path in the panel, not an alert.
     // Empty title is fine — background.js oEmbed-resolves it before the job is stored.
-    ytSend({ action: 'summarizeVideo', videoId, title, url: window.location.href, noPoster });
+    ytSend(chat
+      ? { action: 'chatVideo', videoId, title, url: window.location.href }
+      : { action: 'summarizeVideo', videoId, title, url: window.location.href, noPoster });
   };
 
   summarizeBtn.onclick = () => runVideoSummary(summarizeBtn, false);
   quickBtn.onclick = () => runVideoSummary(quickBtn, true);
+  chatBtn.onclick = () => runVideoSummary(chatBtn, false, true);
 
+  container.appendChild(chatBtn);
   container.appendChild(quickBtn);
   container.appendChild(summarizeBtn);
   player.appendChild(container);
@@ -181,9 +193,10 @@ function createSummaryButton() {
   chrome.runtime.onMessage.addListener((request) => {
     // Clear spinners once streaming starts or fails — initSummary fires before any
     // tokens, so keep them until the first real content/error event.
-    if (['updateSummary', 'summaryComplete', 'summaryError', 'displaySummary'].includes(request.action)) {
+    if (['updateSummary', 'summaryComplete', 'summaryError', 'displaySummary', 'chatReady'].includes(request.action)) {
       summarizeBtn.setLoading(false);
       quickBtn.setLoading(false);
+      chatBtn.setLoading(false);
     }
   });
 }
@@ -268,8 +281,8 @@ function tileBtnBaseStyle(rightPx) {
   return `
     position: absolute; bottom: 8px; right: ${rightPx}px; z-index: 2019;
     width: 32px; height: 32px; border-radius: 50%;
-    color: #fff; border: none; cursor: pointer;
-    font-size: 15px; line-height: 1; display: flex; align-items: center; justify-content: center;
+    color: #fff; border: 1px solid rgba(255,255,255,0.14); cursor: pointer; padding: 0;
+    font-size: 15px; line-height: 1; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center;
     opacity: 0; pointer-events: none; transition: opacity 0.15s, filter 0.15s, background-color 0.2s;
     box-shadow: 0 2px 6px rgba(0,0,0,0.35);
   `;
@@ -293,13 +306,16 @@ function wireTileBtnChrome(btn) {
   };
 }
 
+// Glass mono, matching the player buttons.
+const TILE_BG = 'rgba(15,15,15,0.72)';
+
 function makeTileSumButton() {
   const btn = document.createElement('button');
   btn.className = 'yt-sum-tile-btn';
   btn.title = 'Summarize inline';
-  btn._defaultEmoji = '✨';
+  btn._defaultEmoji = CS_ICONS.sparkles;
   btn._emoji = btn._defaultEmoji;
-  btn._baseBg = 'rgba(92,92,255,0.92)';
+  btn._baseBg = TILE_BG;
   btn._persistent = false;
   btn._state = 'default';
   btn.innerHTML = btn._emoji;
@@ -310,10 +326,10 @@ function makeTileSumButton() {
   btn.applyState = (state) => {
     btn._state = state;
     if (state === 'summarized' || state === 'graphic') {
-      btn._emoji = '✨'; btn._baseBg = 'rgba(92,92,255,0.92)';
+      btn._emoji = CS_ICONS.sparkles; btn._baseBg = TILE_BG;
       btn.title = 'Re-summarize inline'; btn._persistent = true;
     } else {
-      btn._emoji = btn._defaultEmoji; btn._baseBg = 'rgba(92,92,255,0.92)';
+      btn._emoji = btn._defaultEmoji; btn._baseBg = TILE_BG;
       btn.title = 'Summarize inline'; btn._persistent = false;
     }
     if (!btn.disabled) btn.innerHTML = btn._emoji;

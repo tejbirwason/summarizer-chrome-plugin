@@ -14,11 +14,11 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["lib/marked.min.js", "lib/dompurify.min.js", "content-dual.js"]
+      "js": ["lib/marked.min.js", "lib/dompurify.min.js", "icons.js", "content-dual.js"]
     },
     {
       "matches": ["*://*.youtube.com/*"],
-      "js": ["lib/marked.min.js", "lib/dompurify.min.js", "yt-transcript.js", "youtube-content.js"]
+      "js": ["lib/marked.min.js", "lib/dompurify.min.js", "icons.js", "yt-transcript.js", "youtube-content.js"]
     }
   ],
   "options_page": "options.html"

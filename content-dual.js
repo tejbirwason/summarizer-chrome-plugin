@@ -19,6 +19,7 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
     borderSubtle: '#2a2a2a', borderStrong: '#3a3a3a',
     userBubble: '#2b2f3a'
   };
+  const I = self.CS_ICONS;   // shared line icons (icons.js)
 
   // === View state — a local mirror of the background's job for THIS url. ===
   const S = {
@@ -33,6 +34,9 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
     models: {},          // modelId -> { messages, streaming, inProgress, complete, usedModel, duration }
     hasSaved: false,     // page already has a saved summary
     view: 'summary',     // 'summary' | 'history'
+    mode: 'summary',     // 'summary' | 'chat' (transcript as context, no summary up front)
+    sourceWords: 0,      // chat card: transcript size
+    sourcePreview: '',   // chat card: opening lines of the transcript
     foreignUrl: null,    // when viewing ANOTHER page's saved summary (read-only)
     poster: null,        // { dataUrl } | { tooLarge, path } | null
     posterTried: false,
@@ -115,7 +119,7 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
       S.videoId = currentVideoId() || S.videoId;
       return false;
     }
-    const hadPanel = Boolean(document.getElementById('claude-summary-container'));
+    const hadPanel = Boolean(byId('claude-summary-container'));
     S.url = n;
     S.fullUrl = live;
     S.title = document.title || S.title;
@@ -127,10 +131,7 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
     S.posterTried = false;
     S.activeModelId = S.activeModelId || S.config?.models?.[0]?.id || null;
     S._pillDismissed = false;
-    if (hadPanel) {
-      const p = document.getElementById('claude-summary-container');
-      if (p) p.remove();
-    }
+    if (hadPanel) removePanel();
     dismissReopenPill();
     // Rehydrate any saved/in-progress job for the page we just landed on (auto-opens if streaming).
     loadPageState(false);
@@ -178,6 +179,18 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
   function escapeHtml(s) {
     const d = document.createElement('div'); d.textContent = s; return d.innerHTML;
   }
+  // Model icons: a config `icon` of "claude"/"openai" renders the brand logo (simple-icons,
+  // CC0); anything else (emoji, or an old stored icon) renders as escaped text. Inline styles,
+  // not a cs- class, so host-page CSS can't resize the SVG.
+  const LOGOS = {
+    claude: { fill: '#D97757', d: 'm4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z' },
+    openai: { fill: 'currentColor', d: 'M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z' },
+  };
+  function iconHTML(icon) {
+    const l = LOGOS[icon];
+    if (!l) return escapeHtml(icon || '');
+    return `<svg viewBox="0 0 24 24" fill="${l.fill}" aria-hidden="true" style="width:1em;height:1em;display:inline-block;vertical-align:-0.125em;flex:none"><path d="${l.d}"/></svg>`;
+  }
   function playCompletionSound() {
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -218,13 +231,16 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
         width: 30px; height: 30px; border-radius: 8px; display: flex; align-items: center; justify-content: center;
         transition: background .15s, color .15s; padding: 0; }
       .cs-iconbtn:hover { background: ${T.surface2}; color: ${T.textPrimary}; }
+      .cs-iconbtn svg { width: 16px; height: 16px; }
+      .cs-tbtn svg { width: 14px; height: 14px; }
+      .cs-modelpick .cs-mp-caret svg { width: 13px; height: 13px; }
       .cs-toolbar { display: flex; align-items: center; gap: 6px; padding: 8px 10px; }
       .cs-modelpick { display: flex; align-items: center; gap: 6px; background: ${T.surface2}; border: 1px solid ${T.borderStrong};
         color: ${T.textPrimary}; border-radius: 9px; padding: 6px 10px; cursor: pointer; font-size: 13px; font-weight: 500;
         flex: 1; min-width: 0; }
       .cs-modelpick:hover { border-color: ${T.accent}; }
       .cs-modelpick .cs-mp-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; text-align: left; }
-      .cs-modelpick .cs-mp-caret { color: ${T.textMuted}; font-size: 10px; }
+      .cs-modelpick .cs-mp-caret { color: ${T.textMuted}; font-size: 10px; display: flex; }
       .cs-tbtn { border: 1px solid ${T.borderStrong}; background: ${T.surface2}; color: ${T.textSecondary}; cursor: pointer;
         border-radius: 9px; padding: 6px 9px; font-size: 13px; display: flex; align-items: center; gap: 5px; transition: all .15s; }
       .cs-tbtn:hover { color: ${T.textPrimary}; border-color: ${T.accent}; }
@@ -275,8 +291,26 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
       .cs-send { flex-shrink: 0; width: 40px; height: 40px; border-radius: 11px; border: none; background: ${T.accent}; color: ${T.accentInk};
         font-size: 17px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
       .cs-send:disabled { opacity: .4; cursor: default; }
+      .cs-send svg { width: 18px; height: 18px; }
+
+      /* Chat mode: transcript card + starter chips */
+      .cs-src { background: ${T.surface2}; border: 1px solid ${T.borderSubtle}; border-radius: 11px; padding: 11px 13px; margin-bottom: 12px; }
+      .cs-src-h { display: flex; align-items: center; gap: 7px; color: ${T.accent}; font-size: 13px; font-weight: 600; }
+      .cs-src-h svg { width: 15px; height: 15px; }
+      .cs-src-meta { color: ${T.textMuted}; font-size: 12px; margin-top: 3px; }
+      .cs-src-snip { color: ${T.textSecondary}; font-size: 12.5px; line-height: 1.45; margin-top: 8px; padding-left: 9px;
+        border-left: 2px solid ${T.surface3}; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+      .cs-src-snip.cs-open { display: block; -webkit-line-clamp: unset; }
+      .cs-src-more { background: none; border: none; color: ${T.accent}; font: inherit; font-size: 12px; padding: 0; margin-top: 5px; cursor: pointer; }
+      .cs-chips { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 4px; }
+      .cs-chip { display: flex; align-items: center; gap: 6px; background: none; border: 1px solid ${T.borderStrong}; color: ${T.textPrimary};
+        border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 12.5px; cursor: pointer; transition: border-color .15s, background .15s; }
+      .cs-chip:hover { border-color: ${T.accent}; background: ${T.surface2}; }
+      .cs-chip.cs-accent { color: ${T.accent}; border-color: rgba(91,228,200,.45); }
+      .cs-chip svg { width: 13px; height: 13px; }
 
       /* Jump-to-latest (appears when a response streams offscreen while the reader is scrolled up) */
+      .cs-jump svg { width: 14px; height: 14px; }
       .cs-jump { position: absolute; right: 16px; bottom: 74px; z-index: 3; display: none; align-items: center; gap: 6px;
         background: ${T.accent}; color: ${T.accentInk}; border: none; border-radius: 999px; padding: 7px 13px;
         font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.45); }
@@ -310,7 +344,8 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
         padding: 9px 14px 9px 12px; font-family: system-ui, -apple-system, sans-serif; font-size: 13px; cursor: pointer;
         box-shadow: 0 6px 20px rgba(0,0,0,.4); transition: border-color .15s, transform .15s; }
       #cs-reopen-pill:hover { border-color: ${T.accent}; transform: translateY(-1px); }
-      #cs-reopen-pill .cs-pill-x { color: ${T.textMuted}; font-size: 15px; margin-left: 2px; }
+      #cs-reopen-pill .cs-pill-x { color: ${T.textMuted}; font-size: 15px; margin-left: 2px; display: flex; }
+      #cs-reopen-pill svg { width: 14px; height: 14px; }
 
       /* Markdown */
       .cs-md h1,.cs-md h2,.cs-md h3,.cs-md h4 { margin: 16px 0 8px; font-weight: 600; line-height: 1.3; color: ${T.textPrimary}; letter-spacing: -.01em; }
@@ -339,10 +374,10 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
     bar.id = 'fab-container';
     bar.style.cssText = `position: fixed; top: 18px; left: 50%; transform: translateX(-50%); display: none; gap: 8px; z-index: 2147483500;`;
 
-    function makeFab(emoji, bg, title) {
+    function makeFab(icon, bg, title) {
       const btn = document.createElement('button');
       btn.className = 'fab';
-      btn.innerHTML = emoji; btn.title = title; btn._emoji = emoji;
+      btn.innerHTML = icon; btn.title = title; btn._emoji = icon;
       btn.style.cssText = `width: 42px; height: 42px; border-radius: 50%; background: ${bg}; color: ${T.textPrimary};
         border: 1px solid ${T.borderStrong}; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.4);
         display: flex; align-items: center; justify-content: center; font-size: 18px; transition: transform .12s, filter .12s;`;
@@ -362,8 +397,8 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
     // Worker skips the infographic). The ⚡ took the slot the old 🖥️ "Open in Claude Code" FAB
     // held — that path died when the native hosts were removed (background no longer handles
     // openInCC), so this reuses its footprint for something that works.
-    const summarizeFab = makeFab('✨', T.surface2, 'Summarize + infographic');
-    const quickFab = makeFab('⚡', T.surface2, 'Quick summary — no infographic');
+    const summarizeFab = makeFab(I.sparkles, T.surface2, 'Summarize + infographic');
+    const quickFab = makeFab(I.zap, T.surface2, 'Quick summary — no infographic');
 
     summarizeFab.onclick = () => {
       const text = window.getSelection().toString().trim();
@@ -392,6 +427,7 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
     // Optimistically open the panel with a generating state for the preferred model.
     const modelId = S.activeModelId || S.config?.models?.[0]?.id;
     S.isTranscript = false;
+    S.mode = 'summary';
     S.activeModelId = modelId;
     const m = ensureLocalModel(modelId);
     m.messages = []; m.streaming = ''; m.inProgress = true; m.complete = false;
@@ -403,7 +439,61 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
   // ===========================================================================
   // Panel construction
   // ===========================================================================
-  function panelEl() { return document.getElementById('claude-summary-container'); }
+  // The panel can live in this page or in a Document Picture-in-Picture window (always on top,
+  // stays visible across tabs). Every panel lookup goes through pdoc()/byId() so it works in both.
+  let pipWin = null;
+  function pdoc() { return pipWin ? pipWin.document : document; }
+  function byId(id) { return pdoc().getElementById(id); }
+  function panelEl() { return byId('claude-summary-container'); }
+  function removePanel() {
+    const p = panelEl();
+    if (p) p.remove();
+    if (pipWin) { const w = pipWin; pipWin = null; w.close(); }
+  }
+
+  async function togglePip() {
+    if (pipWin) { dockPanel(); return; }
+    const panel = panelEl();
+    if (!panel || !window.documentPictureInPicture) return;
+    const r = panel.getBoundingClientRect();
+    let w;
+    try {
+      w = await documentPictureInPicture.requestWindow({ width: Math.round(r.width), height: Math.round(r.height) });
+    } catch (e) { console.warn('Pop-out failed:', e); return; }
+    const styles = document.getElementById('cs-styles');
+    if (styles) w.document.head.appendChild(styles.cloneNode(true));
+    const fit = w.document.createElement('style');
+    fit.textContent = `
+      html, body { margin: 0; height: 100%; background: ${T.surface0}; }
+      #claude-summary-container { position: static; width: 100%; height: 100vh; border: none; border-radius: 0; box-shadow: none; }
+      .cs-titlebar { cursor: default; }`;
+    w.document.head.appendChild(fit);
+    w.document.title = S.title || 'AI Summary';
+    w.document.body.appendChild(panel);
+    w.document.addEventListener('keydown', onEscape);
+    // Closing the PiP window (its own ✕, or the opener navigating) docks the panel back.
+    w.addEventListener('pagehide', () => { if (pipWin === w) dockPanel(); });
+    pipWin = w;
+    refreshPipButton();
+  }
+  function dockPanel() {
+    const w = pipWin;
+    if (!w) return;
+    const panel = panelEl();
+    pipWin = null;
+    if (panel) {
+      document.body.appendChild(panel);
+      panel.style.left = ''; panel.style.top = ''; panel.style.right = '';
+    }
+    try { w.close(); } catch (e) {}
+    refreshPipButton();
+  }
+  function refreshPipButton() {
+    const b = byId('cs-pip');
+    if (!b) return;
+    b.textContent = pipWin ? '⤓' : '⧉';
+    b.title = pipWin ? 'Dock back into the page' : 'Pop out (stays on top across tabs)';
+  }
 
   function openPanel() {
     injectStyles();
@@ -416,8 +506,7 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
     return panel;
   }
   function closePanel() {
-    const p = panelEl();
-    if (p) p.remove();
+    removePanel();
     if (S.foreignUrl) {
       // We were viewing another page's summary — restore THIS page's own state so the reopen
       // pill (and any later reopen) reflects the current page, not the one we were browsing.
@@ -445,14 +534,18 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
     titleEl.id = 'cs-title';
     titleEl.textContent = 'AI Summary';
 
-    const histBtn = iconBtn('🕘', 'History', () => toggleHistory());
-    const copyBtn = iconBtn('📄', 'Copy source text', copySource);
+    const histBtn = iconBtn(I.history, 'History', () => toggleHistory());
+    const copyBtn = iconBtn(I.copy, 'Copy source text', copySource);
     copyBtn.id = 'cs-copy';
-    const closeBtn = iconBtn('✕', 'Close', closePanel);
+    const closeBtn = iconBtn(I.x, 'Close', closePanel);
+    const pipBtn = iconBtn(I.pip, 'Pop out (stays on top across tabs)', () => togglePip());
+    pipBtn.id = 'cs-pip';
+    if (!window.documentPictureInPicture) pipBtn.style.display = 'none';
 
     titlebar.appendChild(titleEl);
     titlebar.appendChild(histBtn);
     titlebar.appendChild(copyBtn);
+    titlebar.appendChild(pipBtn);
     titlebar.appendChild(closeBtn);
 
     // --- Toolbar: model picker + prompt toggle + regenerate ---
@@ -464,15 +557,15 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
     picker.className = 'cs-modelpick';
     picker.id = 'cs-modelpick';
     picker.onclick = (e) => { e.stopPropagation(); showModelMenu(picker); };
-    picker.innerHTML = `<span class="cs-mp-ico"></span><span class="cs-mp-name"></span><span class="cs-mp-caret">▾</span>`;
+    picker.innerHTML = `<span class="cs-mp-ico"></span><span class="cs-mp-name"></span><span class="cs-mp-caret">${I.chevronDown}</span>`;
 
     const promptBtn = document.createElement('button');
     promptBtn.className = 'cs-tbtn'; promptBtn.id = 'cs-prompt-toggle'; promptBtn.title = 'Edit prompt';
-    promptBtn.innerHTML = '✎'; promptBtn.onclick = () => togglePromptBox();
+    promptBtn.innerHTML = I.pencil; promptBtn.onclick = () => togglePromptBox();
 
     const regenBtn = document.createElement('button');
     regenBtn.className = 'cs-tbtn'; regenBtn.id = 'cs-regen'; regenBtn.title = 'Regenerate';
-    regenBtn.innerHTML = '↻'; regenBtn.onclick = () => regenerate();
+    regenBtn.innerHTML = I.refresh; regenBtn.onclick = () => regenerate();
 
     toolbar.appendChild(picker);
     toolbar.appendChild(promptBtn);
@@ -510,7 +603,7 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendFollowup(); }
     };
     const send = document.createElement('button');
-    send.className = 'cs-send'; send.id = 'cs-send'; send.innerHTML = '➤'; send.onclick = () => sendFollowup();
+    send.className = 'cs-send'; send.id = 'cs-send'; send.innerHTML = I.send; send.onclick = () => sendFollowup();
     composer.appendChild(input);
     composer.appendChild(send);
 
@@ -527,20 +620,20 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
     panel.appendChild(scroll);
     panel.appendChild(composer);
     panel.appendChild(jump);
-    document.body.appendChild(panel);
+    pdoc().body.appendChild(panel);
     return panel;
   }
 
-  function iconBtn(glyph, title, onclick) {
+  function iconBtn(icon, title, onclick) {
     const b = document.createElement('button');
-    b.className = 'cs-iconbtn'; b.title = title; b.textContent = glyph; b.onclick = onclick;
+    b.className = 'cs-iconbtn'; b.title = title; b.innerHTML = icon; b.onclick = onclick;
     return b;
   }
 
   function enableDrag(handle, panel) {
     let dragging = false, sx = 0, sy = 0, ox = 0, oy = 0;
     handle.addEventListener('mousedown', (e) => {
-      if (e.target.tagName === 'BUTTON') return;
+      if (e.target.tagName === 'BUTTON' || pipWin) return;
       dragging = true; sx = e.clientX; sy = e.clientY;
       const r = panel.getBoundingClientRect(); ox = r.left; oy = r.top; e.preventDefault();
     });
@@ -563,7 +656,7 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
     return (el.scrollHeight - el.scrollTop - el.clientHeight) < LIVE_EDGE_PX;
   }
   function hasSelectionIn(el) {
-    const sel = window.getSelection();
+    const sel = (pipWin || window).getSelection();
     if (!sel || sel.isCollapsed || sel.rangeCount === 0) return false;
     return el.contains(sel.anchorNode);
   }
@@ -576,7 +669,7 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
     return users[users.length - 1] || null;
   }
   function updateJump(scroll) {
-    const jb = document.getElementById('cs-jump');
+    const jb = byId('cs-jump');
     if (!jb || !scroll) return;
     const m = S.models[S.activeModelId];
     const streaming = Boolean(m && m.inProgress) && !S.foreignUrl;
@@ -618,10 +711,10 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
   }
 
   function renderSummaryView() {
-    const scroll = document.getElementById('cs-scroll');
-    const composer = document.getElementById('cs-composer');
-    const toolbar = document.getElementById('cs-toolbar');
-    const promptBox = document.getElementById('cs-promptbox');
+    const scroll = byId('cs-scroll');
+    const composer = byId('cs-composer');
+    const toolbar = byId('cs-toolbar');
+    const promptBox = byId('cs-promptbox');
     if (!scroll) return;
 
     // Capture the reader's scroll intent BEFORE we rebuild the DOM (the rebuild resets scrollTop).
@@ -635,9 +728,14 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
     if (composer) composer.style.display = foreign ? 'none' : 'flex';
     if (toolbar) toolbar.style.display = foreign ? 'none' : 'flex';
     if (foreign && promptBox) promptBox.style.display = 'none';
+    // Chat mode has no summary instruction to edit or regenerate — "Summarize instead" lives in
+    // the scroll region as a chip.
+    const chat = S.mode === 'chat';
+    ['cs-prompt-toggle', 'cs-regen'].forEach(id => { const b = byId(id); if (b) b.style.display = chat ? 'none' : 'flex'; });
+    if (chat && promptBox) promptBox.style.display = 'none';
 
     // Title + model picker labels
-    const titleEl = document.getElementById('cs-title');
+    const titleEl = byId('cs-title');
     if (titleEl) titleEl.textContent = S.title || 'AI Summary';
     refreshModelPicker();
 
@@ -683,9 +781,15 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
       return;
     }
 
-    // Conversation turns.
+    if (chat) {
+      if (m.phase === 'transcript') { scroll.appendChild(renderGenerating('summary')); updateComposerEnabled(); return; }
+      scroll.appendChild(renderSourceCard());
+      if (!(m.messages || []).some(x => x.role === 'assistant') && !m.inProgress && !foreign) scroll.appendChild(renderStarterChips());
+    }
+
+    // Conversation turns. A chat has no summary, so every answer renders as a normal turn.
     const msgs = m.messages || [];
-    let renderedSummary = false;
+    let renderedSummary = chat;
     for (let i = 0; i < msgs.length; i++) {
       const turn = msgs[i];
       if (i === 0 && turn.role === 'user') continue; // the instruction+source turn is internal
@@ -712,7 +816,7 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
       meta.className = 'cs-meta';
       const um = m.usedModel || modelMeta(S.activeModelId) || {};
       const label = document.createElement('span');
-      label.textContent = `${um.icon || ''} ${um.name || ''} · ${(m.duration / 1000).toFixed(1)}s`;
+      label.innerHTML = `${iconHTML(um.icon)} ${escapeHtml(um.name || '')} · ${(m.duration / 1000).toFixed(1)}s`;
       meta.appendChild(label);
       // Deep link to this exact summary on the hosted dashboard (the "Cloudflare page"). The
       // background builds the URL because it holds the Worker base + token; we just open it.
@@ -735,6 +839,47 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
       streaming: Boolean(m.inProgress) && !foreign,
       wasFollowing, prevTop, hadSelection
     });
+  }
+
+  // Chat mode: what the model has been given, before anything is sent.
+  function renderSourceCard() {
+    const card = document.createElement('div'); card.className = 'cs-src';
+    const h = document.createElement('div'); h.className = 'cs-src-h';
+    h.innerHTML = I.transcript;
+    h.appendChild(document.createTextNode('Transcript loaded'));
+    const meta = document.createElement('div'); meta.className = 'cs-src-meta';
+    const words = S.sourceWords ? `${S.sourceWords.toLocaleString()} words` : 'Transcript';
+    const hasTurns = (S.models[S.activeModelId]?.messages || []).some(x => x.role === 'assistant');
+    meta.textContent = hasTurns ? words : `${words} · nothing sent yet — ask anything`;
+    card.appendChild(h); card.appendChild(meta);
+    if (S.sourcePreview) {
+      const snip = document.createElement('div'); snip.className = 'cs-src-snip';
+      snip.textContent = S.sourcePreview + (S.sourceWords > 50 ? '…' : '');
+      const more = document.createElement('button'); more.className = 'cs-src-more'; more.textContent = 'Show all';
+      more.onclick = () => {
+        sendToBackground({ action: 'getSource', url: S.foreignUrl || S.fullUrl }, (resp) => {
+          if (!resp?.text) return;
+          snip.textContent = resp.text; snip.classList.add('cs-open'); more.remove();
+        });
+      };
+      card.appendChild(snip); card.appendChild(more);
+    }
+    return card;
+  }
+
+  const STARTERS = ['What are the key takeaways?', 'What’s the most surprising claim?', 'Explain it like I’m new to this', 'Give me a 5-bullet outline'];
+  function renderStarterChips() {
+    const row = document.createElement('div'); row.className = 'cs-chips';
+    STARTERS.forEach(q => {
+      const c = document.createElement('button'); c.className = 'cs-chip'; c.textContent = q;
+      c.onclick = () => { const input = byId('cs-followup'); if (input) { input.value = q; sendFollowup(); } };
+      row.appendChild(c);
+    });
+    const sum = document.createElement('button'); sum.className = 'cs-chip cs-accent';
+    sum.innerHTML = I.sparkles; sum.appendChild(document.createTextNode('Summarize instead'));
+    sum.onclick = () => { S.mode = 'summary'; regenerate(S.activeModelId); };
+    row.appendChild(sum);
+    return row;
   }
 
   function renderSummaryBlock(text, streaming) {
@@ -782,19 +927,22 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
   function caret() { const c = document.createElement('span'); c.className = 'cs-caret'; return c; }
 
   function updateComposerEnabled() {
-    const input = document.getElementById('cs-followup');
-    const send = document.getElementById('cs-send');
+    const input = byId('cs-followup');
+    const send = byId('cs-send');
     const m = S.models[S.activeModelId];
-    const canChat = Boolean(m && m.messages && m.messages.some(x => x.role === 'assistant') && !m.inProgress);
-    if (input) { input.disabled = !canChat; input.placeholder = m && m.inProgress ? 'Generating…' : 'Ask a follow-up…'; }
+    // A chat is ready as soon as its context turn exists; a summary needs its first answer.
+    const ready = S.mode === 'chat' ? Boolean(m && m.messages && m.messages.length) : Boolean(m && m.messages && m.messages.some(x => x.role === 'assistant'));
+    const canChat = ready && !m.inProgress;
+    const idle = S.mode === 'chat' && !m?.messages?.some(x => x.role === 'assistant') ? 'Ask anything about this video…' : 'Ask a follow-up…';
+    if (input) { input.disabled = !canChat; input.placeholder = m && m.inProgress ? 'Generating…' : idle; }
     if (send) send.disabled = !canChat;
   }
 
   function refreshModelPicker() {
-    const picker = document.getElementById('cs-modelpick');
+    const picker = byId('cs-modelpick');
     if (!picker) return;
     const meta = activeMeta();
-    picker.querySelector('.cs-mp-ico').textContent = meta.icon || '✨';
+    picker.querySelector('.cs-mp-ico').innerHTML = iconHTML(meta.icon || '✨');
     picker.querySelector('.cs-mp-name').textContent = meta.name || 'Model';
   }
 
@@ -802,7 +950,7 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
   // Model picker dropdown
   // ===========================================================================
   function showModelMenu(anchor) {
-    const existing = document.getElementById('cs-model-menu');
+    const existing = byId('cs-model-menu');
     if (existing) { existing._close(); return; }
     const menu = document.createElement('div');
     menu.id = 'cs-model-menu'; menu.className = 'cs-menu';
@@ -816,23 +964,36 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
     allModels().forEach(mdl => {
       const item = document.createElement('button');
       item.className = 'cs-menu-item';
-      item.innerHTML = `<span>${mdl.icon || ''}</span><span>${escapeHtml(mdl.name)}</span>`;
+      item.innerHTML = `<span>${iconHTML(mdl.icon)}</span><span>${escapeHtml(mdl.name)}</span>`;
       if (mdl.id === currentId) { const c = document.createElement('span'); c.className = 'cs-check'; c.textContent = '✓'; item.appendChild(c); }
       item.onclick = () => { close(); chooseModel(mdl.id); };
       menu.appendChild(item);
     });
 
     const onAway = (e) => { if (!menu.contains(e.target) && e.target !== anchor) close(); };
-    function close() { menu.remove(); document.removeEventListener('click', onAway); }
+    const doc = pdoc();
+    function close() { menu.remove(); doc.removeEventListener('click', onAway); }
     menu._close = close;
-    document.body.appendChild(menu);
-    setTimeout(() => document.addEventListener('click', onAway), 0);
+    doc.body.appendChild(menu);
+    setTimeout(() => doc.addEventListener('click', onAway), 0);
   }
 
   function chooseModel(id) {
     // Remember as the default everywhere.
     try { chrome.storage.local.set({ 'pref:defaultModel': id }); } catch (e) {}
     const meta = modelMeta(id);
+    if (S.mode === 'chat') {
+      // Never regenerate a chat into a summary. The next question goes to the new model, and the
+      // background/Worker carry the conversation over.
+      const prev = S.models[S.activeModelId];
+      if (prev?.inProgress) return;
+      const m = ensureLocalModel(id);
+      if (id !== S.activeModelId && prev) { m.messages = [...prev.messages]; m.complete = true; m.inProgress = false; m.streaming = ''; }
+      m.usedModel = meta;
+      S.activeModelId = id;
+      render();
+      return;
+    }
     const hasSummary = S.models[S.activeModelId]?.messages?.some(x => x.role === 'assistant');
     if (hasSummary || S.models[S.activeModelId]?.inProgress) {
       // Regenerate the current page's summary with the chosen model.
@@ -852,20 +1013,20 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
     return (m && m.prompt) || S.config?.defaultPrompt || '';
   }
   function togglePromptBox() {
-    const box = document.getElementById('cs-promptbox');
-    const btn = document.getElementById('cs-prompt-toggle');
+    const box = byId('cs-promptbox');
+    const btn = byId('cs-prompt-toggle');
     if (!box) return;
     const show = box.style.display === 'none';
     box.style.display = show ? 'block' : 'none';
     if (btn) btn.classList.toggle('cs-on', show);
     if (show) {
-      const ta = document.getElementById('cs-prompt-input');
+      const ta = byId('cs-prompt-input');
       ta.value = S.prompt || defaultPromptText();
       ta.focus();
     }
   }
   function applyPrompt() {
-    const ta = document.getElementById('cs-prompt-input');
+    const ta = byId('cs-prompt-input');
     const prompt = (ta?.value || '').trim();
     if (!prompt) return;
     S.prompt = prompt;
@@ -890,7 +1051,7 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
   }
 
   function sendFollowup() {
-    const input = document.getElementById('cs-followup');
+    const input = byId('cs-followup');
     const q = (input?.value || '').trim();
     if (!q) return;
     const m = S.models[S.activeModelId];
@@ -906,7 +1067,7 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
   function copySource() {
     // The background owns the source text — fetch it and copy. Fall back to the summary if the
     // job has no source (shouldn't happen for a real summary).
-    const flash = () => { const b = document.getElementById('cs-copy'); if (b) { b.textContent = '✓'; setTimeout(() => b.textContent = '📄', 1400); } };
+    const flash = () => { const b = byId('cs-copy'); if (b) { b.innerHTML = I.check; setTimeout(() => b.innerHTML = I.copy, 1400); } };
     const url = S.foreignUrl || S.fullUrl;
     sendToBackground({ action: 'getSource', url }, (resp) => {
       let text = resp && resp.text;
@@ -927,11 +1088,11 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
     S.view = 'history'; renderHistory();
   }
   function renderHistory() {
-    const scroll = document.getElementById('cs-scroll');
-    const composer = document.getElementById('cs-composer');
-    const toolbar = document.getElementById('cs-toolbar');
-    const promptBox = document.getElementById('cs-promptbox');
-    const titleEl = document.getElementById('cs-title');
+    const scroll = byId('cs-scroll');
+    const composer = byId('cs-composer');
+    const toolbar = byId('cs-toolbar');
+    const promptBox = byId('cs-promptbox');
+    const titleEl = byId('cs-title');
     if (!scroll) return;
     if (composer) composer.style.display = 'none';
     if (toolbar) toolbar.style.display = 'none';
@@ -958,17 +1119,17 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
   function renderHistItem(item) {
     const row = document.createElement('div'); row.className = 'cs-hist-item';
     const ico = document.createElement('div'); ico.className = 'cs-hist-ico';
-    ico.textContent = item.isTranscript ? '🎬' : (item.modelIcon || '📄');
+    ico.innerHTML = item.mode === 'chat' ? '💬' : iconHTML(item.isTranscript ? '🎬' : (item.modelIcon || '📄'));
     const body = document.createElement('div'); body.className = 'cs-hist-body';
     const title = document.createElement('div'); title.className = 'cs-hist-title';
     title.textContent = item.title || item.url || 'Untitled';
     const snip = document.createElement('div'); snip.className = 'cs-hist-snip'; snip.textContent = item.snippet || '';
     const meta = document.createElement('div'); meta.className = 'cs-hist-meta';
     const parts = [];
-    if (item.modelName) parts.push(`${item.modelIcon || ''} ${item.modelName}`.trim());
-    parts.push(formatAge(item.timestamp));
+    if (item.modelName) parts.push(`${iconHTML(item.modelIcon)} ${escapeHtml(item.modelName)}`.trim());
+    parts.push(escapeHtml(formatAge(item.timestamp)));
     if (item.inProgress) parts.push('⏳ generating');
-    meta.textContent = parts.join('  ·  ');
+    meta.innerHTML = parts.join('&nbsp; ·&nbsp; ');
     body.appendChild(title); body.appendChild(snip); body.appendChild(meta);
 
     const del = document.createElement('button'); del.className = 'cs-hist-del'; del.title = 'Delete'; del.textContent = '🗑';
@@ -1007,8 +1168,8 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
     pill.id = 'cs-reopen-pill';
     const meta = activeMeta();
     const label = document.createElement('span');
-    label.innerHTML = `<span style="margin-right:6px">${meta.icon || '📄'}</span>Summary ready`;
-    const x = document.createElement('span'); x.className = 'cs-pill-x'; x.textContent = '✕';
+    label.innerHTML = `<span style="margin-right:6px">${iconHTML(meta.icon || '📄')}</span>${S.mode === 'chat' ? 'Chat ready' : 'Summary ready'}`;
+    const x = document.createElement('span'); x.className = 'cs-pill-x'; x.innerHTML = I.x;
     x.onclick = (e) => { e.stopPropagation(); dismissReopenPill(true); };
     pill.appendChild(label); pill.appendChild(x);
     pill.onclick = () => { S.view = 'summary'; openPanel(); };
@@ -1045,6 +1206,9 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
     S.isTranscript = Boolean(state.isTranscript);
     S.activeModelId = state.activeModelId || S.activeModelId || S.config?.models?.[0]?.id;
     S.videoId = state.videoId || S.videoId;
+    S.mode = state.mode || 'summary';
+    S.sourceWords = state.sourceWords || 0;
+    S.sourcePreview = state.sourcePreview || '';
     S.models = {};
     Object.keys(state.models || {}).forEach(id => {
       const sm = state.models[id];
@@ -1057,7 +1221,8 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
         duration: sm.duration || null
       };
     });
-    S.hasSaved = Object.values(S.models).some(m => (m.messages || []).some(x => x.role === 'assistant'));
+    S.hasSaved = Object.values(S.models).some(m => (m.messages || []).some(x => x.role === 'assistant')) ||
+      (S.mode === 'chat' && Boolean(state.hasSource));
   }
 
   function loadPageState(autoOpen) {
@@ -1135,7 +1300,27 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
       m.messages = []; m.streaming = ''; m.inProgress = true; m.complete = false;
       m.usedModel = request.usedModel || modelMeta(request.modelId);
       m.phase = request.phase || null;   // 'transcript' → panel shows "Fetching transcript…" instantly
+      S.mode = request.mode || 'summary';
+      S.sourceWords = 0; S.sourcePreview = '';
       ensurePanelOpen();
+      return;
+    }
+
+    // Chat job is set up: transcript is context, nothing generated. Show the card + composer.
+    if (request.action === 'chatReady' && forThisUrl) {
+      S.foreignUrl = null;
+      S.mode = 'chat';
+      S.activeModelId = request.modelId;
+      S.sourceWords = request.sourceWords || 0;
+      S.sourcePreview = request.sourcePreview || '';
+      S.hasSaved = true;
+      const m = ensureLocalModel(request.modelId);
+      m.messages = [{ role: 'user', content: '' }];   // the internal context turn (never rendered)
+      m.streaming = ''; m.inProgress = false; m.complete = true; m.phase = null;
+      m.usedModel = request.usedModel || modelMeta(request.modelId);
+      ensurePanelOpen();
+      const input = byId('cs-followup');
+      if (input) input.focus();
       return;
     }
 
@@ -1147,6 +1332,7 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
 
     if (request.action === 'regenStart' && forThisUrl) {
       S.activeModelId = request.modelId;
+      S.mode = 'summary';
       if (request.prompt != null) S.prompt = request.prompt;
       const m = ensureLocalModel(request.modelId);
       m.messages = []; m.streaming = ''; m.inProgress = true; m.complete = false;
@@ -1200,10 +1386,14 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
 
     if (request.action === 'summaryError' && forThisUrl) {
       const m = ensureLocalModel(request.modelId);
-      m.inProgress = false; m.streaming = '';
-      if (m.messages.length && m.messages[m.messages.length - 1].role === 'user') m.messages.pop();
+      m.inProgress = false; m.streaming = ''; m.phase = null;
+      // (In a chat, index 0 is the context turn — never pop that, only a pending question.)
+      const keep = S.mode === 'chat' ? 1 : 0;
+      if (m.messages.length > keep && m.messages[m.messages.length - 1].role === 'user') m.messages.pop();
+      // A chat that failed before its transcript arrived has no context to talk to.
+      if (S.mode === 'chat' && !m.messages.length) S.mode = 'summary';
       ensurePanelOpen();
-      const scroll = document.getElementById('cs-scroll');
+      const scroll = byId('cs-scroll');
       if (scroll) {
         const err = document.createElement('div'); err.className = 'cs-error';
         err.textContent = `Error: ${request.error}`;
@@ -1224,18 +1414,20 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
   // ===========================================================================
   // Init
   // ===========================================================================
+  function onEscape(e) {
+    if (e.key !== 'Escape' || !panelEl()) return;
+    const ae = pdoc().activeElement;
+    if (ae && (ae.id === 'cs-followup' || ae.id === 'cs-prompt-input') && ae.value) { ae.blur(); return; }
+    closePanel();
+  }
+
   function init() {
     injectStyles();
     injectFABs();
 
     // Escape closes the panel (a keyboard interaction is intent — but don't steal it from a
     // text field the reader is typing in; blur first so their draft isn't lost on the first tap).
-    document.addEventListener('keydown', (e) => {
-      if (e.key !== 'Escape' || !panelEl()) return;
-      const ae = document.activeElement;
-      if (ae && (ae.id === 'cs-followup' || ae.id === 'cs-prompt-input') && ae.value) { ae.blur(); return; }
-      closePanel();
-    });
+    document.addEventListener('keydown', onEscape);
 
     // YouTube SPA: video→video without reload. Also popstate / hash for other SPAs.
     const onSpaNav = () => { try { syncPageIdentity(); } catch (e) { /* ignore */ } };

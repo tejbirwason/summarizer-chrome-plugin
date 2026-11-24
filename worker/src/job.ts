@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
-import { findModel, resolvePrompt, type ModelDef } from './config';
+import { findModel, resolvePrompt, CHAT_PROMPT, type ModelDef } from './config';
 import { streamCompletion, type Msg } from './openrouter';
 import { submitPoster, pollPoster } from './fal';
 
@@ -30,6 +30,9 @@ interface Generation {
   prompt: string;
   messages: Msg[];
   content: string;
+  /** Where the current turn starts in `content`. A follow-up appends its answer to `content`,
+   *  so clients get `content.slice(turnStart)`, never the whole conversation glued together. */
+  turnStart?: number;
   state: 'streaming' | 'complete' | 'error';
   error?: string;
   startedAt: number;
@@ -47,6 +50,7 @@ interface JobState {
   generations: Record<string, Generation>;
   poster?: { state: string; falRequestId?: string; r2Key?: string; error?: string };
   noPoster?: boolean; // "quick summary" — skip the explain-viz infographic entirely
+  mode?: 'summary' | 'chat'; // chat = transcript loaded as context, no summary generated
 }
 
 const IDLE_TIMEOUT_MS = 150_000; // matches the local host's watchdog
@@ -77,20 +81,37 @@ export class SummaryJob extends DurableObject<Env> {
   async start(input: {
     id: string; url: string; title: string; kind: 'video' | 'page';
     videoId?: string; source: string; modelId?: string; prompt?: string; noPoster?: boolean;
+    chat?: boolean;
   }) {
     const model = findModel(input.modelId);
     const prompt = resolvePrompt(input.prompt, model);
     const job: JobState = {
       id: input.id, url: input.url, title: input.title, kind: input.kind,
       videoId: input.videoId, source: input.source,
-      activeModelId: model.id, generations: {}, noPoster: input.noPoster,
+      activeModelId: model.id, generations: {},
+      // A chat never produces a summary, so there's nothing to draw a poster from.
+      noPoster: input.noPoster || input.chat,
+      mode: input.chat ? 'chat' : 'summary',
     };
+    if (input.chat) {
+      // Seed the conversation and stop: no model call until the user asks something, which
+      // arrives through followup() exactly like a question after a summary.
+      job.generations[model.id] = {
+        modelId: model.id,
+        usedModel: { id: model.id, name: model.name, icon: model.icon },
+        prompt: CHAT_PROMPT,
+        messages: [{ role: 'system', content: `${CHAT_PROMPT}\n\n[Transcript]\n${input.source}` }],
+        content: '',
+        state: 'complete',
+        startedAt: Date.now(),
+      };
+    }
     await this.ctx.storage.put('job', job);
     await this.upsertSummary(job);
     // Wiki live ingest. Fire-and-forget: the card extractor skips unchanged sources, so a
     // regenerate of the same transcript costs nothing.
     this.env.WIKI_INGEST.send({ sourceId: job.id }).catch((e) => console.error('wiki enqueue failed', String(e)));
-    this.run(job, model, prompt);
+    if (!input.chat) this.run(job, model, prompt);
     return { id: job.id, activeModelId: model.id };
   }
 
@@ -102,18 +123,34 @@ export class SummaryJob extends DurableObject<Env> {
     return job;
   }
 
-  async followup(question: string) {
+  // `modelId` lets a conversation switch model mid-thread (the chat-mode picker does this):
+  // the new model's generation starts from a copy of the current conversation.
+  async followup(question: string, modelId?: string) {
     const job = await this.load();
     if (!job) throw new Error('no job');
-    const gen = job.generations[job.activeModelId];
-    if (!gen) throw new Error('no active generation');
+    const prev = job.generations[job.activeModelId];
+    if (!prev) throw new Error('no active generation');
+    const model = findModel(modelId ?? job.activeModelId);
+    if (model.id !== job.activeModelId) {
+      job.generations[model.id] = {
+        modelId: model.id,
+        usedModel: { id: model.id, name: model.name, icon: model.icon },
+        prompt: prev.prompt,
+        messages: [...prev.messages],
+        content: '',
+        state: 'complete',
+        startedAt: Date.now(),
+      };
+      job.activeModelId = model.id;
+    }
+    const gen = job.generations[model.id];
     gen.messages.push({ role: 'user', content: question });
     gen.state = 'streaming';
     gen.startedAt = Date.now();
     await this.save(job, true);
     this.broadcast('user', { text: question });
-    this.run(job, findModel(job.activeModelId), null, gen.messages);
-    return { ok: true };
+    this.run(job, model, null, gen.messages);
+    return { ok: true, activeModelId: model.id };
   }
 
   async regenerate(modelId: string, prompt?: string) {
@@ -121,6 +158,7 @@ export class SummaryJob extends DurableObject<Env> {
     if (!job) throw new Error('no job');
     const model = findModel(modelId);
     job.activeModelId = model.id;
+    job.mode = 'summary'; // "Summarize instead" from a chat turns it into a normal summary
     await this.save(job, true);
     this.run(job, model, resolvePrompt(prompt, model));
     return { ok: true, activeModelId: model.id };
@@ -151,7 +189,11 @@ export class SummaryJob extends DurableObject<Env> {
     gen.state = 'streaming';
     gen.content = existing ? gen.content : '';
     gen.startedAt = Date.now();
+    gen.turnStart = gen.content.length;
     job.generations[model.id] = gen;
+    // Saved before the first await, so a /stream that connects right after the caller's POST
+    // returns snapshots THIS turn (from turnStart), not the previous answer.
+    this.save(job, true);
 
     // Write the row NOW, not on completion. The DO knows a generation is in flight but D1
     // is what the dashboard reads, and a LEFT JOIN against a row that doesn't exist yet
@@ -168,7 +210,7 @@ export class SummaryJob extends DurableObject<Env> {
     kick();
 
     const started = Date.now();
-    const answerStart = gen.content.length;
+    const answerStart = gen.turnStart;
 
     streamCompletion(
       this.env.OPENROUTER_API_KEY,
@@ -189,7 +231,7 @@ export class SummaryJob extends DurableObject<Env> {
           await this.save(job, true);
           await this.persistGeneration(job, gen);
           this.broadcast('complete', {
-            modelId: model.id, content: gen.content,
+            modelId: model.id, content: gen.content.slice(answerStart),
             usedModel: gen.usedModel, durationMs: gen.durationMs,
           });
           // "Quick summary" opts out of the infographic. Skip fal entirely — no poster row,
@@ -274,7 +316,7 @@ export class SummaryJob extends DurableObject<Env> {
       if (r.status === 'error') {
         job.poster = { ...job.poster, state: 'error', error: r.error };
       } else {
-        // fal returns PNG for gpt-image-2; derive the extension rather than assuming.
+        // fal returns PNG for gpt-image-2.5; derive the extension rather than assuming.
         const ct = r.contentType ?? 'image/png';
         const ext = ct.includes('jpeg') || ct.includes('jpg') ? 'jpg' : 'png';
         const key = `${job.id.replace(/[^a-z0-9]/gi, '_')}/${Date.now()}.${ext}`;
@@ -323,7 +365,8 @@ export class SummaryJob extends DurableObject<Env> {
           new TextEncoder().encode(
             `event: snapshot\ndata: ${JSON.stringify({
               activeModelId: job.activeModelId,
-              content: gen?.content ?? '',
+              content: gen ? gen.content.slice(gen.turnStart ?? 0) : '',
+              mode: job.mode ?? 'summary',
               state: gen?.state ?? 'streaming',
               usedModel: gen?.usedModel,
               poster: job.poster ?? null,
