@@ -415,6 +415,7 @@ function startSummary({ url, title, sourceText, isTranscript, videoId, tab, mode
     modelId,
     prompt,
     usedModel: metaOf(model),
+    noPoster: job.noPoster,
     config: aiConfig
   });
 
@@ -486,6 +487,7 @@ async function handleGetPageState(request, sendResponse) {
     activeModelId: job.activeModelId,
     isTranscript: job.isTranscript,
     videoId: job.videoId,
+    noPoster: Boolean(job.noPoster),
     hasSource: Boolean(job.sourceText),
     models: job.models,
     timestamp: job.timestamp
@@ -557,6 +559,7 @@ async function getVideoTranscriptAndSummarize(request, tab) {
     modelId: model.id,
     prompt,
     usedModel: metaOf(model),
+    noPoster: early.noPoster,
     config: aiConfig,
     phase: 'transcript'
   });
@@ -775,8 +778,22 @@ function handleRequest(request, sender, sendResponse) {
         const { base } = await workerCreds();
         const nurl = normUrl(request.url || '');
         const job = jobs[nurl] || await loadJob(nurl);
-        const key = request.key || job?.posterKey;
-        if (!key) { sendResponse({ type: 'none' }); return; }
+        let key = request.key || job?.posterKey;
+        let state = key ? 'complete' : 'none';
+        // The poster finishes AFTER the summary, and streamModel() closes the SSE stream on
+        // 'complete', so the 'poster' event usually never reaches us. Ask the Worker instead
+        // (the summary id is the same normalized url).
+        if (!key && nurl) {
+          const rec = await api(`/api/summary/${encodeURIComponent(nurl)}`).catch(() => null);
+          const p = rec?.poster;
+          if (p?.state === 'complete' && p.r2_key) {
+            key = p.r2_key; state = 'complete';
+            if (job) { job.posterKey = key; await persistJob(nurl); }
+          } else if (p?.state) {
+            state = p.state; // 'generating' | 'error'
+          }
+        }
+        if (!key) { sendResponse({ type: state === 'generating' ? 'pending' : state === 'error' ? 'error' : 'none' }); return; }
         sendResponse({ type: 'poster', url: `${base}/poster/${encodeURIComponent(key)}` });
       } catch (e) { sendResponse({ type: 'error', error: String(e.message || e) }); }
     })();

@@ -34,8 +34,12 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
     hasSaved: false,     // page already has a saved summary
     view: 'summary',     // 'summary' | 'history'
     foreignUrl: null,    // when viewing ANOTHER page's saved summary (read-only)
-    poster: null,        // { dataUrl } | { tooLarge, path } | null
+    poster: null,        // { url } (R2 poster served by the Worker) | null
     posterTried: false,
+    posterState: null,   // null | 'pending' | 'ready' | 'error' — drives the infographic loading view
+    noPoster: false,     // true = text-only summary (⚡); false = infographic-first view (✨)
+    showText: false,     // infographic mode: reader asked to see the text summary instead
+    loadStartedAt: 0,    // for the elapsed counter in the infographic loading view
     resyncing: false
   };
 
@@ -125,6 +129,8 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
     S.foreignUrl = null;
     S.poster = null;
     S.posterTried = false;
+    S.posterState = null;
+    S.showText = false;
     S.activeModelId = S.activeModelId || S.config?.models?.[0]?.id || null;
     S._pillDismissed = false;
     if (hadPanel) {
@@ -250,7 +256,31 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
 
       .cs-poster { margin: 0 0 14px; border: 1px solid ${T.borderStrong}; border-radius: 10px; overflow: hidden; cursor: zoom-in; background: ${T.surface2}; }
       .cs-poster img { display: block; width: 100%; height: auto; }
-      .cs-poster-large { display: flex; align-items: center; gap: 8px; padding: 10px 12px; }
+      .cs-pv { display: flex; flex-direction: column; gap: 10px; }
+      .cs-pv .cs-poster { margin: 0; }
+      .cs-pv-bar { display: flex; gap: 8px; justify-content: flex-end; margin-bottom: 10px; }
+      .cs-pv .cs-pv-bar { margin-bottom: 0; }
+      .cs-pv-btn { padding: 6px 12px; }
+      .cs-pv-load { aspect-ratio: 16 / 10; border-radius: 10px; border: 1px solid ${T.borderSubtle};
+        background: ${T.surface2}; display: flex; flex-direction: column; justify-content: space-between; padding: 16px 16px 12px; }
+      .cs-pv-failed { aspect-ratio: auto; min-height: 160px; justify-content: center; align-items: center; gap: 8px; text-align: center; }
+      .cs-ghost { display: flex; flex-direction: column; gap: 9px; }
+      .cs-gh { background: ${T.surface3}; border-radius: 5px; animation: cs-breathe 2.6s ease-in-out infinite; }
+      .cs-gh-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 4px 0; }
+      .cs-gh-grid .cs-gh { aspect-ratio: 3 / 4; border-radius: 6px; }
+      @keyframes cs-breathe { 0%, 100% { opacity: .35; } 50% { opacity: .8; } }
+      @media (prefers-reduced-motion: reduce) { .cs-gh { animation: none; opacity: .5; } }
+      .cs-pv-foot { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+      .cs-pv-label { color: ${T.textSecondary}; font-size: 13.5px; font-weight: 500; }
+      #cs-lightbox { position: fixed; inset: 0; z-index: 2147483647; background: rgba(0,0,0,.92);
+        display: flex; align-items: center; justify-content: center; overflow: hidden; cursor: zoom-out; }
+      #cs-lightbox img { max-width: 100vw; max-height: 100vh; object-fit: contain; cursor: zoom-in; }
+      #cs-lightbox.cs-lb-zoom { display: block; overflow: auto; }
+      #cs-lightbox.cs-lb-zoom img { max-width: none; max-height: none; width: 100%; height: auto; cursor: zoom-out; }
+      .cs-lb-tools { position: fixed; top: 14px; right: 14px; display: flex; gap: 8px; }
+      .cs-lb-tools button { width: 38px; height: 38px; border-radius: 50%; border: 1px solid rgba(255,255,255,.25);
+        background: rgba(20,20,20,.75); color: #fff; font-size: 16px; cursor: pointer; }
+      .cs-lb-tools button:hover { background: rgba(60,60,60,.9); }
 
       .cs-summary { color: ${T.textPrimary}; }
       .cs-turn { margin-top: 14px; }
@@ -362,8 +392,8 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
     // Worker skips the infographic). The ⚡ took the slot the old 🖥️ "Open in Claude Code" FAB
     // held — that path died when the native hosts were removed (background no longer handles
     // openInCC), so this reuses its footprint for something that works.
-    const summarizeFab = makeFab('✨', T.surface2, 'Summarize + infographic');
-    const quickFab = makeFab('⚡', T.surface2, 'Quick summary — no infographic');
+    const summarizeFab = makeFab('✨', T.surface2, 'Infographic summary');
+    const quickFab = makeFab('⚡', T.surface2, 'Text summary (no infographic)');
 
     summarizeFab.onclick = () => {
       const text = window.getSelection().toString().trim();
@@ -394,7 +424,8 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
     S.isTranscript = false;
     S.activeModelId = modelId;
     const m = ensureLocalModel(modelId);
-    m.messages = []; m.streaming = ''; m.inProgress = true; m.complete = false;
+    m.messages = []; m.streaming = ''; m.inProgress = true; m.complete = false; m.error = null;
+    resetPosterView(noPoster);
     S.view = 'summary';
     openPanel();
     sendToBackground({ action: 'summarizeDual', text, url: S.fullUrl, title: S.title, prompt: S.prompt || undefined, noPoster: Boolean(noPoster) });
@@ -421,7 +452,7 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
     if (S.foreignUrl) {
       // We were viewing another page's summary — restore THIS page's own state so the reopen
       // pill (and any later reopen) reflects the current page, not the one we were browsing.
-      S.foreignUrl = null; S.poster = null; S.posterTried = false;
+      S.foreignUrl = null; S.poster = null; S.posterTried = false; S.posterState = null; S.showText = false;
       loadPageState(false);
       return;
     }
@@ -643,6 +674,14 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
 
     const m = S.models[S.activeModelId];
     scroll.textContent = '';
+    stopElapsedTicker();
+
+    // Infographic mode (✨): the panel shows the poster, never the text, unless the reader asks.
+    if (m && !S.noPoster && !S.showText) {
+      if (composer) composer.style.display = 'none';
+      renderPosterView(scroll, m);
+      return;
+    }
 
     if (foreign) {
       const bar = document.createElement('div');
@@ -654,24 +693,11 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
       scroll.appendChild(bar);
     }
 
-    // Inline poster (YouTube graphic), if available.
-    if (S.poster && S.poster.dataUrl) {
-      const box = document.createElement('div');
-      box.className = 'cs-poster';
-      box.title = 'Open poster';
-      const img = document.createElement('img');
-      img.src = S.poster.dataUrl; img.alt = 'Generated poster';
-      box.appendChild(img);
-      box.onclick = () => sendToBackground({ action: 'openGraphic', graphicPath: S.poster.path });
-      scroll.appendChild(box);
-    } else if (S.poster && S.poster.tooLarge) {
-      const box = document.createElement('div');
-      box.className = 'cs-poster cs-poster-large';
-      box.innerHTML = `<span>🖼️</span><span class="cs-hint">Poster ready — too large to preview inline.</span>`;
-      const open = document.createElement('button'); open.className = 'cs-btn-ghost'; open.textContent = 'Open';
-      open.onclick = () => sendToBackground({ action: 'openGraphic', graphicPath: S.poster.path });
-      box.appendChild(open);
-      scroll.appendChild(box);
+    // Infographic summary opened as text: offer the way back to the poster.
+    if (!S.noPoster && S.showText) {
+      const back = document.createElement('div'); back.className = 'cs-pv-bar';
+      back.appendChild(pvButton('🖼️ Show infographic', () => { S.showText = false; render(); }));
+      scroll.appendChild(back);
     }
 
     if (!m) {
@@ -735,6 +761,153 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
       streaming: Boolean(m.inProgress) && !foreign,
       wasFollowing, prevTop, hadSelection
     });
+  }
+
+  // ===========================================================================
+  // Infographic view (✨ mode): loading state → poster → full-screen lightbox
+  // ===========================================================================
+  function resetPosterView(noPoster) {
+    S.noPoster = Boolean(noPoster);
+    S.poster = null; S.posterTried = false; S.posterState = null; S.showText = false;
+    S.loadStartedAt = Date.now();
+    clearTimeout(posterPollTimer);
+  }
+
+  function pvButton(label, onclick, title) {
+    const b = document.createElement('button');
+    b.className = 'cs-btn-ghost cs-pv-btn'; b.textContent = label; b.onclick = onclick;
+    if (title) b.title = title;
+    return b;
+  }
+
+  function posterStage(m) {
+    if (m.inProgress && m.phase === 'transcript') return { step: 1, label: 'Fetching transcript' };
+    if (m.inProgress) return { step: 2, label: 'Reading the video' };
+    return { step: 3, label: 'Drawing the infographic' };
+  }
+
+  function renderPosterView(scroll, m) {
+    const wrap = document.createElement('div'); wrap.className = 'cs-pv';
+
+    if (S.poster && S.poster.url) {
+      const box = document.createElement('div');
+      box.className = 'cs-poster'; box.title = 'View full screen';
+      const img = document.createElement('img');
+      img.src = S.poster.url; img.alt = `Infographic summary of ${S.title || 'this page'}`;
+      img.onerror = () => { S.posterState = 'error'; S.poster = null; render(); };
+      box.appendChild(img);
+      box.onclick = () => openLightbox(S.poster.url);
+      wrap.appendChild(box);
+      const bar = document.createElement('div'); bar.className = 'cs-pv-bar';
+      bar.appendChild(pvButton('⛶ Full screen', () => openLightbox(S.poster.url)));
+      bar.appendChild(pvButton('📝 Text', () => { S.showText = true; render(); }, 'Show the text summary'));
+      wrap.appendChild(bar);
+      scroll.appendChild(wrap);
+      scroll.scrollTop = 0;
+      return;
+    }
+
+    const hasText = (m.messages || []).some(x => x.role === 'assistant');
+    const failed = m.error || S.posterState === 'error' || (!m.inProgress && !hasText);
+    if (failed) {
+      const card = document.createElement('div'); card.className = 'cs-pv-load cs-pv-failed';
+      const t = document.createElement('div'); t.className = 'cs-pv-label';
+      t.textContent = m.error ? 'The summary failed.' : "The infographic didn't come through.";
+      const sub = document.createElement('div'); sub.className = 'cs-hint';
+      sub.textContent = m.error ? String(m.error) : 'The text summary is still available.';
+      card.appendChild(t); card.appendChild(sub);
+      wrap.appendChild(card);
+      const bar = document.createElement('div'); bar.className = 'cs-pv-bar';
+      if (hasText) bar.appendChild(pvButton('📝 Show text summary', () => { S.showText = true; render(); }));
+      bar.appendChild(pvButton('↻ Try again', () => regenerate()));
+      wrap.appendChild(bar);
+      scroll.appendChild(wrap);
+      return;
+    }
+
+    // Loading: a faint ghost of a poster layout that slowly breathes, plus one quiet status line.
+    const stage = posterStage(m);
+    const card = document.createElement('div'); card.className = 'cs-pv-load';
+    const ghost = document.createElement('div'); ghost.className = 'cs-ghost';
+    ghost.innerHTML = `
+      <div class="cs-gh" style="width:58%;height:13px"></div>
+      <div class="cs-gh" style="width:34%;height:8px"></div>
+      <div class="cs-gh-grid">
+        <div class="cs-gh"></div><div class="cs-gh"></div><div class="cs-gh"></div><div class="cs-gh"></div>
+      </div>
+      <div class="cs-gh" style="width:82%;height:7px"></div>`;
+    ghost.querySelectorAll('.cs-gh').forEach((g, i) => { g.style.animationDelay = `${i * 0.18}s`; });
+    const foot = document.createElement('div'); foot.className = 'cs-pv-foot';
+    const label = document.createElement('div'); label.className = 'cs-pv-label';
+    label.textContent = stage.label;
+    const el = document.createElement('div'); el.className = 'cs-hint'; el.id = 'cs-pv-elapsed';
+    el.dataset.step = stage.step;
+    foot.appendChild(label); foot.appendChild(el);
+    card.appendChild(ghost); card.appendChild(foot);
+    wrap.appendChild(card);
+    if (hasText) {
+      const bar = document.createElement('div'); bar.className = 'cs-pv-bar';
+      bar.appendChild(pvButton('📝 Read text while you wait', () => { S.showText = true; render(); }));
+      wrap.appendChild(bar);
+    }
+    scroll.appendChild(wrap);
+    startElapsedTicker();
+  }
+
+  let elapsedTimer = null;
+  function startElapsedTicker() {
+    if (!S.loadStartedAt) S.loadStartedAt = Date.now();
+    const tick = () => {
+      const el = document.getElementById('cs-pv-elapsed');
+      if (!el) { stopElapsedTicker(); return; }
+      const s = Math.floor((Date.now() - S.loadStartedAt) / 1000);
+      el.textContent = `Step ${el.dataset.step} of 3 · ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+    };
+    tick();
+    elapsedTimer = setInterval(tick, 1000);
+  }
+  function stopElapsedTicker() { clearInterval(elapsedTimer); elapsedTimer = null; }
+
+  // Full-screen lightbox over the page itself (no new tab). Click the image to toggle between
+  // fit-to-screen and actual size; Esc or ✕ closes; ⛶ or F goes browser-fullscreen.
+  function openLightbox(url) {
+    closeLightbox();
+    const ov = document.createElement('div'); ov.id = 'cs-lightbox';
+    const img = document.createElement('img'); img.src = url; img.alt = `Infographic summary of ${S.title || 'this page'}`;
+    img.onclick = (e) => { e.stopPropagation(); ov.classList.toggle('cs-lb-zoom'); };
+    const tools = document.createElement('div'); tools.className = 'cs-lb-tools';
+    const mk = (glyph, title, fn) => {
+      const b = document.createElement('button'); b.textContent = glyph; b.title = title;
+      b.onclick = (e) => { e.stopPropagation(); fn(); };
+      tools.appendChild(b);
+    };
+    mk('⛶', 'Browser full screen (F)', () => toggleLbFullscreen(ov));
+    mk('↗', 'Open original in a new tab', () => { try { window.open(url, '_blank'); } catch (_) {} });
+    mk('✕', 'Close (Esc)', closeLightbox);
+    ov.appendChild(img); ov.appendChild(tools);
+    ov.onclick = () => closeLightbox();
+    document.body.appendChild(ov);
+    document.addEventListener('keydown', lbKeys, true);
+  }
+  // Capture phase so YouTube's own shortcuts (f, k, space, arrows) don't fire under the overlay.
+  function lbKeys(e) {
+    const ov = document.getElementById('cs-lightbox');
+    if (!ov) { document.removeEventListener('keydown', lbKeys, true); return; }
+    e.stopPropagation();
+    if (e.key === 'Escape') { if (!document.fullscreenElement) { e.preventDefault(); closeLightbox(); } }
+    else if (e.key === 'f' || e.key === 'F') { e.preventDefault(); toggleLbFullscreen(ov); }
+    else if (e.key === ' ') { e.preventDefault(); }
+  }
+  function toggleLbFullscreen(ov) {
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    else if (ov.requestFullscreen) ov.requestFullscreen().catch(() => {});
+  }
+  function closeLightbox() {
+    const ov = document.getElementById('cs-lightbox');
+    if (!ov) return;
+    if (document.fullscreenElement === ov) document.exitFullscreen().catch(() => {});
+    ov.remove();
+    document.removeEventListener('keydown', lbKeys, true);
   }
 
   function renderSummaryBlock(text, streaming) {
@@ -991,7 +1164,7 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
       if (!state || !state.exists) return;
       hydrateFrom(state);
       S.foreignUrl = item.fullUrl || item.url;
-      S.poster = null; S.posterTried = false;   // load the foreign video's poster, not this page's
+      S.poster = null; S.posterTried = false; S.posterState = null; S.showText = false;   // the foreign page's poster, not this one's
       S.view = 'summary';
       render();
       maybeLoadPoster();
@@ -1023,14 +1196,32 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
   // ===========================================================================
   // Poster (YouTube generated graphic → inline)
   // ===========================================================================
-  function maybeLoadPoster() {
-    if (S.posterTried || !S.videoId) return;
+  // The poster lands a minute or two after the summary, so while the Worker reports it as
+  // 'generating' we re-ask every 15s (capped). A posterReady broadcast short-circuits this.
+  let posterPollTimer = null;
+  function maybeLoadPoster(attempt = 0) {
+    if (S.noPoster) return;
+    if (S.posterTried && attempt === 0) return;
     S.posterTried = true;
-    sendToBackground({ action: 'getPoster', videoId: S.videoId }, (resp) => {
-      if (!resp) return;
-      if (resp.type === 'graphic' && resp.dataUrl) { S.poster = { dataUrl: resp.dataUrl, path: resp.path }; }
-      else if (resp.error === 'too_large') { S.poster = { tooLarge: true, path: resp.path }; }
-      else return;
+    clearTimeout(posterPollTimer);
+    const forUrl = S.foreignUrl || S.fullUrl;
+    sendToBackground({ action: 'getPoster', url: forUrl }, (resp) => {
+      if (!resp || (S.foreignUrl || S.fullUrl) !== forUrl) return; // navigated away meanwhile
+      const m = S.models[S.activeModelId];
+      // 'none' right after the summary lands only means the Worker hasn't written the poster
+      // row yet, so keep waiting a little. Give up after ~5 min.
+      const stillComing = resp.type === 'pending' || (resp.type === 'none' && m && m.complete && attempt < 6);
+      if (resp.type === 'poster' && resp.url) {
+        S.poster = { url: resp.url }; S.posterState = 'ready';
+      } else if (stillComing && attempt < 40) {
+        S.posterState = 'pending';
+        posterPollTimer = setTimeout(() => maybeLoadPoster(attempt + 1), 8000);
+        return;
+      } else if (resp.type === 'error' || stillComing || (m && m.complete)) {
+        S.posterState = 'error';
+      } else {
+        return;
+      }
       if (panelEl() && S.view === 'summary') render();
     });
   }
@@ -1045,6 +1236,7 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
     S.isTranscript = Boolean(state.isTranscript);
     S.activeModelId = state.activeModelId || S.activeModelId || S.config?.models?.[0]?.id;
     S.videoId = state.videoId || S.videoId;
+    S.noPoster = Boolean(state.noPoster);
     S.models = {};
     Object.keys(state.models || {}).forEach(id => {
       const sm = state.models[id];
@@ -1132,7 +1324,11 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
       S.prompt = request.prompt || S.prompt;
       S.activeModelId = request.modelId;
       const m = ensureLocalModel(request.modelId);
-      m.messages = []; m.streaming = ''; m.inProgress = true; m.complete = false;
+      // A brand-new run resets the infographic view; the second initSummary of the same YouTube
+      // run (after the transcript arrives) keeps the elapsed counter going.
+      if (request.phase === 'transcript' || !m.inProgress) resetPosterView(request.noPoster);
+      else S.noPoster = Boolean(request.noPoster);
+      m.messages = []; m.streaming = ''; m.inProgress = true; m.complete = false; m.error = null;
       m.usedModel = request.usedModel || modelMeta(request.modelId);
       m.phase = request.phase || null;   // 'transcript' → panel shows "Fetching transcript…" instantly
       ensurePanelOpen();
@@ -1149,6 +1345,9 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
       S.activeModelId = request.modelId;
       if (request.prompt != null) S.prompt = request.prompt;
       const m = ensureLocalModel(request.modelId);
+      // No poster yet (it failed or never came)? This run gets another shot at one.
+      if (!S.poster) { S.posterTried = false; S.posterState = null; S.loadStartedAt = Date.now(); }
+      m.error = null;
       m.messages = []; m.streaming = ''; m.inProgress = true; m.complete = false;
       m.usedModel = request.usedModel || modelMeta(request.modelId);
       ensurePanelOpen();
@@ -1186,6 +1385,12 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
       return;
     }
 
+    if (request.action === 'posterReady' && forThisUrl && !S.foreignUrl) {
+      S.posterTried = false;
+      maybeLoadPoster();
+      return;
+    }
+
     if (request.action === 'summaryComplete' && forThisUrl) {
       const m = ensureLocalModel(request.modelId);
       m.inProgress = false; m.complete = true; m.duration = request.duration;
@@ -1200,9 +1405,10 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
 
     if (request.action === 'summaryError' && forThisUrl) {
       const m = ensureLocalModel(request.modelId);
-      m.inProgress = false; m.streaming = '';
+      m.inProgress = false; m.streaming = ''; m.error = request.error || 'Unknown error';
       if (m.messages.length && m.messages[m.messages.length - 1].role === 'user') m.messages.pop();
       ensurePanelOpen();
+      if (!S.noPoster && !S.showText) { render(); return; }
       const scroll = document.getElementById('cs-scroll');
       if (scroll) {
         const err = document.createElement('div'); err.className = 'cs-error';

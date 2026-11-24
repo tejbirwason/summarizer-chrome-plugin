@@ -119,9 +119,9 @@ function createSummaryButton() {
   // and no fal cost. Both scrape the transcript here in the page (the Worker can't — YouTube
   // blocks the whole cloud ASN) and hand it to the background; only the noPoster flag differs.
   const summarizeBtn = makeButton('yt-summarize-btn', '✨', '#5C5CFF', '#4A4AD9');
-  summarizeBtn.title = 'Summarize + infographic (cloud)';
+  summarizeBtn.title = 'Infographic summary';
   const quickBtn = makeButton('yt-quick-btn', '⚡', '#2f8f7f', '#26766a');
-  quickBtn.title = 'Quick summary — no infographic';
+  quickBtn.title = 'Text summary (no infographic)';
 
   const runVideoSummary = async (btn, noPoster) => {
     const videoId = new URLSearchParams(window.location.search).get('v');
