@@ -5,8 +5,11 @@
 // Code was only ever the runtime that could reach fal; a Worker reaches it directly, which
 // is why the two buttons collapse into one.
 
-const MODEL = 'fal-ai/gpt-image-2';
+const MODEL = 'openai/gpt-image-2.5/sunburst/text-to-image';
 const BASE = `https://queue.fal.run/${MODEL}`;
+// fal's queue serves status/result under the app id (first two path segments), not the full
+// model path — polling `${BASE}/requests/...` 404s for a multi-segment model like this one.
+const QUEUE = `https://queue.fal.run/${MODEL.split('/').slice(0, 2).join('/')}`;
 const WIDTH = 3584;
 const HEIGHT = 2016; // exact 16:9, multiples of 16, ~7.2 MP (under fal's ~8.3 MP cap)
 
@@ -43,7 +46,7 @@ export async function submitPoster(falKey: string, title: string, summary: strin
     body: JSON.stringify({
       prompt: buildPrompt(title, summary),
       image_size: { width: WIDTH, height: HEIGHT },
-      quality: 'high',
+      quality: 'max',
     }),
   });
   const j = (await res.json()) as { request_id?: string; detail?: unknown };
@@ -61,11 +64,12 @@ export type PollResult =
 export async function pollPoster(falKey: string, requestId: string): Promise<PollResult> {
   const auth = { Authorization: `Key ${falKey}` };
 
-  const st = await fetch(`${BASE}/requests/${requestId}/status`, { headers: auth });
+  const st = await fetch(`${QUEUE}/requests/${requestId}/status`, { headers: auth });
   const sj = (await st.json()) as { status?: string };
+  if (sj.status === 'FAILED' || sj.status === 'ERROR') return { status: 'error', error: `fal ${sj.status}` };
   if (sj.status !== 'COMPLETED') return { status: 'pending' };
 
-  const rs = await fetch(`${BASE}/requests/${requestId}`, { headers: auth });
+  const rs = await fetch(`${QUEUE}/requests/${requestId}`, { headers: auth });
   const rj = (await rs.json()) as any;
   const url: string | undefined = rj?.images?.[0]?.url ?? rj?.image?.url;
 
