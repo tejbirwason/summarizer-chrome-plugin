@@ -4,72 +4,71 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Chrome extension providing AI-powered summarization of any page selection or YouTube video, via a local Python native-messaging host that routes to OpenRouter models. Key traits:
+Chrome extension that summarizes any page selection or YouTube video. Summaries run on a **Cloudflare Worker** (`worker/`) that calls OpenRouter, stores results in D1, renders explain-viz posters via fal into R2, and serves a dashboard. The extension is a client of that Worker.
 
-- **Background-owned job store** — the service worker owns all summary state + persistence, so a summary keeps generating and gets saved even after you navigate away from the tab that started it. Content scripts are thin renderers that rehydrate from the background (`getPageState`).
-- **Redesigned reading panel** — dark neutral palette (teal/amber accents, no blue), document-style summary + right-aligned chat turns, sticky follow-up composer.
-- **First-class model picker** with a remembered default (`pref:defaultModel`), an in-panel **editable prompt** (`pref:defaultPrompt`), a **history** view of past summaries, a "Summary ready" reopen pill on already-summarized pages, and **inline poster** display (downscaled preview of an explain-viz graphic).
-- The old ✒️ **draft** flow was removed. Only ✨ Summarize and 🖥️ Open in Claude Code remain.
+- **Worker owns durable state.** One Durable Object (`SummaryJob`) per normalized URL runs the OpenRouter stream, so a summary finishes and saves even if the tab or service worker dies.
+- **background.js keeps a render cache** of each job (`chrome.storage.local['summary:<url>']`) and relays Worker SSE deltas to the tab.
+- **Reading panel** (content-dual.js): dark neutral palette (teal/amber, no blue), model picker with a remembered default (`pref:defaultModel`), in-panel prompt editor (`pref:defaultPrompt`), history view, "Summary ready" reopen pill, inline poster.
+- **Two FABs on a selection:** ✨ summary + infographic, ⚡ quick summary (no infographic).
+- **Dashboard** (`worker/public/index.html`): poster gallery, summary detail, per-summary chat drawer (Cloudflare Agents SDK, `SummaryChat` DO).
+- The old native-messaging summarizer (`local-ai-handler.py` + `com.localai.json`) and the 🖥️ "Open in Claude Code" flow are **dead**. background.js no longer calls them. Only `yt-summary.py` is still used (transcripts).
 
 ## Key Commands
 
 ```bash
-# Run tests
-npm test
+# Worker
+cd worker && npx tsc --noEmit        # typecheck
+set -a && . worker/.env && set +a && (cd worker && npx wrangler deploy)   # deploy — API token, never OAuth
+set -a && . worker/.env && set +a && (cd worker && npx wrangler tail)     # live logs
 
-# Run tests in watch mode  
-npm run test:watch
-
-# Run tests with coverage
-npm run test:coverage
+# Extension: no build step. Reload it after editing (see "Live-testing").
+node --check content-dual.js         # quick syntax check
 ```
 
 ## Architecture
 
-### Core Components
+### Worker (`worker/`)
 
-1. **background.js** - Service worker that **owns the job store** (the heart of the design):
-   - One **job per normalized URL** (`normUrl` keeps YouTube's `?v=` in the key). A job holds the source text, prompt, `activeModelId`, and a per-model `{ messages, streaming, inProgress, complete, usedModel, duration }`. Deltas accumulate here and are throttle-persisted to `chrome.storage.local['summary:<url>']` + flushed on complete — so generation survives the content script dying.
-   - `streamModel()` connects the native port, accumulates, relays best-effort to the tab, and runs an **idle watchdog** (150s, reset per delta) that errors out a hung LiteLLM call instead of spinning forever. `loadJob()` clears stale `inProgress` flags on rehydration (a job reaching that path has no live port).
-   - Message API: `summarizeDual`/`summarizeVideo` (start), `regenerate` (model/prompt swap), `followup`, `getPageState` (rehydrate), `listSummaries` (history), `deleteSummary`, `getPoster` (inline graphic), `openInCC`/`openVideoInCC`, `getSummaryStatus`/`openGraphic`, `getConfig`. The toolbar icon (`chrome.action.onClicked`) sends `togglePanel`.
-   - `resolvePreferredModel`/`resolvePreferredPrompt` apply the remembered `pref:defaultModel`/`pref:defaultPrompt` when a request omits them, so the picker's choice applies to every entry point (incl. YouTube's button, which can't know the pref).
+- `src/index.ts` — routes. `/api/*` needs `Authorization: Bearer <APP_TOKEN>`; everything else is static assets (the dashboard). Key routes: `GET /api/models`, `GET|POST /api/prefs`, `POST /api/summarize`, `GET /api/job/<id>/stream` (SSE), `GET /api/summary/<id>`, `GET /api/summaries`, `DELETE /api/summaries/<id>`, `POST /api/import`, `/poster/<key>` (R2), `/agents/summary-chat/*` (chat agent).
+- `src/job.ts` — `SummaryJob` DO: streams the generation, writes `generations` rows to D1, kicks off the poster.
+- `src/openrouter.ts` — direct `fetch` to OpenRouter (no LiteLLM). Passes the model's `reasoning` object through as-is.
+- `src/fal.ts` — explain-viz poster render (port of the explain-viz skill's `render.sh`) → R2 bucket `summarizer-posters`.
+- `src/chat.ts` — `SummaryChat` agent (`@cloudflare/ai-chat`) for the dashboard chat drawer.
+- `src/config.ts` — **the model list and prompts that actually run** (see Model config).
+- Bindings: D1 `DB`, R2 `POSTERS`, Images `IMAGES`, DOs `JOB` + `SummaryChat`. Secrets: `OPENROUTER_API_KEY`, `FAL_KEY`, `APP_TOKEN` (local: `worker/.dev.vars`).
 
-2. **content-dual.js** - The **universal renderer** (injected on all pages, incl. YouTube — youtube-content.js only draws buttons and routes through the background, so this file renders every panel):
-   - Thin, reactive VIEW of the background's job for the current URL. On load it queries `getPageState` and rehydrates; while streaming it appends deltas (with a `streamingLength` gap-check that triggers a resync on reconnect); it never persists.
-   - Creates the selection FABs (✨ Summarize, 🖥️ Open in Claude Code), the panel (masthead: title, 🕘 history, 📄 copy, ✕ close; toolbar: model picker, ✎ prompt editor, ↻ regenerate; scroll region; sticky composer), the history view, the model dropdown, and the "Summary ready" reopen pill.
-   - Palette lives in the `T` token object; all styles in one injected `#cs-styles` sheet (classes prefixed `cs-`). Enter=send / Shift+Enter=newline in the composer.
+### Extension
 
-3. **youtube-content.js** - YouTube-specific content script:
-   - Adds "✨ Summarize" + "🖥️ Open in Claude Code" buttons to YouTube video pages (`/watch`), appended **inside `#movie_player`** at its top-right corner. Anchoring to the player (rather than `position: fixed` on `document.body`) keeps them on the video across theater/fullscreen/miniplayer instead of floating over page content; the container swallows `click`/`dblclick`/`mousedown` so pressing a button doesn't toggle playback.
-   - Initiates dual-mode video summarization
-   - **Feed-tile buttons**: also injects a hover-revealed 🖥️ "Open in Claude Code" button onto every regular-video thumbnail across the feed / search results / watch-page sidebar, so a transcript can be opened in Claude Code without navigating into the video. Reuses the existing `openVideoInCC` message flow — no `background.js` or native-host changes. Implementation notes:
-     - **Two layouts must both be handled** — YouTube ships them simultaneously: the old Polymer markup (search results, watch sidebar) uses `a#thumbnail` inside `ytd-thumbnail`; the new view-model markup (home + channel grids) uses `a.ytLockupViewModelContentImage` (no `id`) inside `div.ytLockupViewModelHost`. The selector matches both; missing the new one is why buttons never showed on the home feed. Ads/Shorts/playlists are skipped (hrefs lack `watch?v=`); `videoId` is read from the anchor href **at click time** (tiles are virtualized/recycled, so caching the ID would summarize the wrong video).
-     - The button is appended to the **thumbnail box** — `ytd-thumbnail` (old) or `.ytLockupViewModelHost` (new) — both `position: relative` and coincident with the thumbnail in every renderer. Positioned **bottom-right** (`✨` at `right: 46px`, `🖥️` at `right: 8px`) at `z-index: 2019` — above the content-level preview but below the sticky masthead (`z-index: 2020`) so buttons never bleed over the search bar when a tile scrolls up. Note this corner also holds YouTube's duration badge, which the buttons cover while shown; top-right was avoided because the inline-preview mute/CC controls live there.
-     - **Reveal is JS pointer-tracking, NOT CSS `:hover`.** When the inline hover-preview plays, YouTube floats a shared `#video-preview` element (parented at `ytd-app`) over the thumbnail, so the cursor's hit-test target becomes the preview, not the tile — the tile loses `:hover` and a CSS-revealed button vanishes exactly when you're looking at it. A throttled `mousemove` handler uses `document.elementsFromPoint(x, y)` (which sees *through* the overlay to the card beneath) to resolve the card under the cursor and toggle that card's button visible. An in-flight (loading) button stays visible even when un-hovered.
-     - A `MutationObserver` (throttled ~250ms) re-injects as infinite scroll adds tiles; idempotency is by button-presence check (not a flag) so recycled tiles that get their children wiped get a fresh button.
-     - On success a green toast ("✅ Opened in Claude Code") slides up and the clicked button briefly shows ✅; the completion listener is guarded by `activeCCTileBtn` so the watch-page fixed button's flow is untouched. Only one open is tracked at a time.
+1. **background.js** — service worker.
+   - `api()` / `workerCreds()` call the Worker. Base URL + token come from the options page (`worker:base`, `worker:token`); base defaults to `https://summarizer.goldenoreo.workers.dev`.
+   - Keeps one cached job per normalized URL (`normUrl` keeps YouTube's `?v=`). `streamModel()` reads the Worker's SSE stream, accumulates, and relays `updateSummary` / `summaryComplete` / `summaryError` to the tab.
+   - Message API: `summarizeDual`/`summarize`/`summarizeVideo` (start), `regenerate`, `followup`, `getPageState` (rehydrate), `listSummaries`, `getSource`, `deleteSummary`, `getPoster` (R2 URL), `getConfig`, `getDashboardLink`. Toolbar icon sends `togglePanel`.
+   - `resolvePreferredModel`/`resolvePreferredPrompt` apply `pref:defaultModel`/`pref:defaultPrompt` when a request omits them.
+   - Transcripts (`fetchTranscript`), in order: (1) `com.ytsummary` native host (`yt-summary.py`), (2) a transcript the content script already scraped, (3) DOM scrape of the transcript panel (`yt-transcript.js`). YouTube blocks transcript fetches by ASN, so this can't move into the Worker.
 
-4. **local-ai-handler.py** - Native messaging host for summarization:
-   - `models[]` are the picker's primary models (default = `models[0]`, the "best" pick); `alternateModels[]` are additional picker/regenerate targets. Both are selectable from the single in-panel model picker (the old per-model tab UI is gone — one active model at a time, switching regenerates).
-   - Summary state keys by URL in the background now (not per-model-id in the content script), so model-id renames no longer strand saved summaries.
-   - All models route through OpenRouter via LiteLLM (`openrouter/` prefix), authenticated by `OPENROUTER_API_KEY`. Supports streaming; handles text + transcript summarization.
-   - **`getGraphic`** returns a generated explain-viz poster as an inline JPEG **preview** — the originals are 4K (11–14 MB), far over Chrome's ~1 MB native-message cap, so it downscales with the built-in `sips` (no extra Python deps) and returns the ORIGINAL path so a click still opens full-res in Preview.
+2. **content-dual.js** — the universal renderer (all pages, incl. YouTube). Thin view of the background's job for the current URL; rehydrates via `getPageState`, appends deltas with a `streamingLength` gap-check, never persists. Palette in the `T` token object; styles in one injected `#cs-styles` sheet (`cs-` prefix). Enter = send, Shift+Enter = newline.
+   - Model icons: a config `icon` of `"claude"` or `"openai"` renders the brand SVG (simple-icons, CC0) via `iconHTML()`; any other value (emoji, old stored icons) renders as escaped text. The dashboard has the same helper.
 
-5. **yt-summary.py** - Native messaging host for YouTube:
-   - Fetches YouTube transcripts using youtube_transcript_api
-   - Communicates via stdio protocol
-   - Returns full transcript to background script
+3. **youtube-content.js** — YouTube buttons; routes everything through the background, so content-dual.js renders the panel.
+   - Watch-page buttons are appended **inside `#movie_player`** (top-right) so they follow theater/fullscreen/miniplayer; the container swallows `click`/`dblclick`/`mousedown` so pressing a button doesn't toggle playback.
+   - **Feed-tile buttons** on every regular-video thumbnail (feed, search, sidebar):
+     - Two layouts ship at once: old Polymer (`a#thumbnail` in `ytd-thumbnail`) and new view-model (`a.ytLockupViewModelContentImage` in `div.ytLockupViewModelHost`). Match both. Ads/Shorts/playlists are skipped (no `watch?v=`). Read `videoId` from the href **at click time** — tiles are recycled.
+     - Buttons sit bottom-right of the thumbnail box at `z-index: 2019` (below the sticky masthead's 2020). They cover the duration badge while shown; top-right holds the preview's mute/CC controls.
+     - **Reveal is JS pointer-tracking, not CSS `:hover`.** YouTube's inline preview (`#video-preview`, parented at `ytd-app`) floats over the tile and steals `:hover`. A throttled `mousemove` uses `document.elementsFromPoint()` to find the card underneath. A loading button stays visible when un-hovered.
+     - A throttled (~250ms) `MutationObserver` re-injects on infinite scroll; idempotency is by button-presence check, so recycled tiles get a fresh button.
 
-### Message Flow
+4. **yt-summary.py** — native host `com.ytsummary`: `youtube_transcript_api` → Webshare proxy → yt-dlp. Stdio protocol, 4-byte little-endian length + JSON. Log: `/tmp/native-host-test.txt`. Manifest `com.ytsummary.json` goes in Chrome's `NativeMessagingHosts/` (`~/Library/Application Support/Google/Chrome/NativeMessagingHosts/` on macOS; Arc uses it too). Optional: without it, transcripts fall back to the page.
 
-**Text Summarization:**
-1. User selects text → FAB appears → clicks ✨
-2. content-dual.js sends `summarizeDual` (with `url`, `title`, optional `prompt`) to background.js
-3. background.js creates a job keyed by the URL, resolves the preferred model, connects the native port
-4. local-ai-handler.py streams the summary; background.js accumulates into the job, persists, and relays deltas to the tab
-5. content-dual.js renders the streaming summary; on complete it's saved (survives navigation) and a follow-up composer/history/model-picker are available
+### Message flow
 
-**Follow-up / Regenerate:** content-dual.js sends `followup {question}` or `regenerate {modelId, prompt}`; the background continues/replaces the job's conversation and streams back. The model picker persists `pref:defaultModel`; the prompt editor persists `pref:defaultPrompt`.
+1. User selects text → ✨ or ⚡ → content-dual.js sends `summarizeDual {text, url, title, noPoster?}`.
+2. background.js resolves model + prompt, `POST /api/summarize`, opens `/api/job/<id>/stream`.
+3. The `SummaryJob` DO streams from OpenRouter, saves to D1, and (unless `noPoster`) renders the poster.
+4. background.js relays deltas; content-dual.js renders. On complete, the poster loads from `/poster/<key>`.
+
+YouTube: youtube-content.js sends `summarizeVideo {videoId}` → background.js gets the transcript (see order above) → same flow as text.
+
+Follow-up / regenerate: `followup {question}` or `regenerate {modelId, prompt}` continue or replace the job's conversation on the Worker.
 
 ### Wiki (`/wiki`)
 
@@ -84,125 +83,87 @@ An agent-maintained wiki compiled from every summarized source. Design + mockups
 - **Chat** (`src/wiki-chat.ts`): `WikiChat` agent at `/agents/wiki-chat/<thread>`, tools `search_wiki` (FTS5 + Vectorize `summarizer-wiki`, RRF), `read_page`, `read_source`.
 - Debug: `POST /api/wiki/ingest-now {"id"}` runs one card synchronously and returns the real error; `POST /api/wiki/rewrite {"slug"}` rewrites one page now; `GET /api/wiki/stats`.
 
-**YouTube Summarization:** youtube-content.js sends `summarizeVideo {videoId}` → background.js fetches the transcript via yt-summary.py → starts a job exactly like text summarization → **content-dual.js** renders the panel (youtube-content.js only draws buttons + clears their spinners on summary events).
+## Model config
 
-### YouTube Transcript Summarization Flow
+**Two files, keep them in sync:**
 
-1. **Button Creation**: youtube-content.js detects YouTube page, adds "✨ Summarize" button
-2. **User Clicks**: Extracts video ID, sends `summarizeVideo` to background.js
-3. **Transcript Fetching**: background.js → yt-summary.py (native messaging) → youtube_transcript_api
-4. **Transcript Return**: yt-summary.py returns full transcript via stdio protocol (4-byte length + JSON)
-5. **Summarization**: background.js creates a URL-keyed job → local-ai-handler.py streams the summary with the preferred model
-6. **Streaming Display**: deltas stream to **content-dual.js** (the renderer), which shows the panel; if the video has a generated explain-viz poster it loads inline via `getPoster`
+- `worker/src/config.ts` — **what runs.** `MODELS[0]` is the default. The Worker falls back to `MODELS[0]` for an unknown model id, so a model added only to the extension silently runs the old default. **Changes need a Worker deploy.**
+- `ai-config.json` — what the extension's picker shows (ids, names, icons). Changes need an extension reload. Its `litellm_model` / `openInClaudeCode` fields are leftovers from the native host and unused.
 
-#### Native Messaging Setup Requirements
+Both have `models[]` (primary; `[0]` is the default) and `alternateModels[]`. Ids must be unique across both. Alternates define no `prompt`, so they use the current prompt.
 
-1. **Install Native Host Manifests**: Copy both to Chrome's NativeMessagingHosts directory:
-   - `com.ytsummary.json` (YouTube transcripts)
-   - `com.localai.json` (dual-mode summarization)
-   - macOS: `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/`
-   - Linux: `~/.config/google-chrome/NativeMessagingHosts/`
-   - Windows: Registry entry required
+Prompt resolution (`resolvePrompt` in config.ts): explicit prompt → the model's own `prompt` (primaries only) → remembered `pref:defaultPrompt` → `DEFAULT_PROMPT`. So the default model's own prompt beats anything saved in the ✎ editor.
 
-2. **Python Dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+One active model at a time. Choosing a model saves `pref:defaultModel` and, if the page has a summary, sends `regenerate`. Each generation records `usedModel` ({id, name, icon}) so captions and history name the model that wrote it. **Changing the default model means resetting two saved prefs**, or the old one keeps winning:
+- extension: `chrome.storage.local['pref:defaultModel']`
+- Worker: D1 `prefs.defaultModel` (used when a request has no `modelId`, e.g. feed tiles) — `POST /api/prefs {"defaultModel":"<id>"}`.
 
-3. **Environment Setup**: Create `.env` with `OPENROUTER_API_KEY` (see `.env.example`)
+### Reasoning
 
-4. **Path Configuration**: Ensure Python scripts are executable and paths in manifests match actual locations
+OpenRouter takes one unified `reasoning` field and maps it per provider; `openrouter.ts` passes it through:
 
-See `NATIVE_MESSAGING_SETUP.md` for detailed setup and troubleshooting.
+```ts
+reasoning: { effort: 'high' }        // current Claude (adaptive thinking) and GPT models
+reasoning: { max_tokens: 10000 }     // manual thinking budget — older Claude models only
+```
 
-#### Native Messaging Protocol Details
+Current Claude models (Opus 4.8+, Fable 5.1, Sonnet 5) use adaptive thinking steered by `effort`; Opus 5.5 and Fable 5.1 can't turn thinking off. Check model IDs with `curl -s https://openrouter.ai/api/v1/models` — they change often.
 
-- Communication uses stdio (stdin/stdout) with 4-byte little-endian length prefix
-- Messages are JSON encoded
-- Debug logs:
-  - yt-summary.py → `/tmp/native-host-test.txt`
-  - local-ai-handler.py → `/tmp/local-ai-handler.log`
-- Error handling includes user-friendly messages with setup instructions
+## Deploying the Worker
 
-### Key Implementation Details
+**Always deploy with the Cloudflare API token. Never `wrangler login`.**
 
-- Chrome Extension Manifest V3
-- Dual-mode summarization (fast + deep) via native messaging
-- Streaming responses for all AI interactions
-- All UI updates use `textContent` to prevent XSS
-- Native messaging requires manual setup (both hosts)
-- Configurable AI models via `ai-config.json`
-- Tests use Jest with jsdom and mocked Chrome APIs
+- The Worker lives in the **personal Cloudflare account** (tejbirwason@gmail.com, account `70f16665…`, pinned in `worker/wrangler.jsonc`). The OAuth login on this machine is the **work** account (tj@relevanceai.com, "Arg AI") and must not be used or replaced.
+- `worker/.env` (gitignored, `chmod 600`) holds `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` — same token as `~/influencer-ugc/.env`. If it's missing, recreate it: `rg "^CLOUDFLARE_(API_TOKEN|ACCOUNT_ID)=" ~/influencer-ugc/.env > worker/.env`.
+- Load it with `set -a` (the file has no `export` lines, so a bare `source` leaves wrangler on OAuth and the wrong account):
+  ```bash
+  cd worker && set -a && . ./.env && set +a && npx wrangler whoami   # must say tejbirwason@gmail.com
+  cd worker && set -a && . ./.env && set +a && npx wrangler deploy
+  ```
+- Same for every wrangler command against this Worker (`tail`, `secret put`, `d1 migrations apply summarizer --remote`).
 
 ## Security Notes
 
-- API keys stored locally:
-  - `OPENROUTER_API_KEY` in `.env` (gitignored) — used by local-ai-handler.py for all summarization
-  - (The old Claude-API draft flow and its `config.js` key are gone; `background.js` still `importScripts('config.js')` defensively so an existing file doesn't break, but it's no longer required.)
-- Rendered markdown is sanitized with DOMPurify; data injected as `textContent` (no `innerHTML` for untrusted data)
-- Native messaging requires explicit manifest setup
+- Secrets live in the Worker (`wrangler secret put`), not the extension. The extension holds only the `APP_TOKEN` (options page).
+- Rendered markdown is sanitized with DOMPurify; untrusted data goes in via `textContent` or `escapeHtml()`.
+- `background.js` still `importScripts('config.js')` defensively; the file is no longer needed.
 
 ## Debugging
 
-**Log files:**
-- `tail -f /tmp/local-ai-handler.log` - AI summarization (models, errors, API calls)
-- `tail -f /tmp/native-host-test.txt` - YouTube transcript fetching
-
-**Common issues:**
-- **Button spins forever, nothing in either log.** Almost always an orphaned content script, not broken code. Reloading the extension leaves the content scripts already injected into open tabs running but disconnected — `chrome.runtime.id` becomes `undefined` and `sendMessage` throws "Extension context invalidated". The message never reaches background.js, so *no log line is written anywhere*. **Fix: reload the page.** Diagnose it by checking whether `/tmp/local-ai-handler.log` shows the `status` polls (every ~15s from youtube-content.js) suddenly stopping — that timestamp is when the extension was reloaded. `sendToBackground()` / `ytSend()` now detect this, clear the spinners, and show a "refresh this page" banner instead of hanging.
-- If reloading the page doesn't help, check the service worker console (`chrome://extensions` → the extension → "service worker"). If `loadAIConfig()` throws, `configLoaded` stays `false` and **every** message queues in `pendingRequests` forever — identical silent-hang symptom, different cause.
-- `litellm.UnsupportedParamsError: openrouter does not support parameters: ['reasoning_effort']` (or `['thinking']`) → something is setting LiteLLM's *native* reasoning params on an `openrouter/` model. Don't. Use the unified `reasoning` object (see below); `build_params()` routes it to `extra_body`. LiteLLM accepts `reasoning_effort` for `gpt-5.6-sol` but rejects it for `gpt-5.6-sol-pro`, so this failure is per-model and easy to miss.
-- Occasionally LiteLLM yields the whole completion as a single stream chunk (~60s of blank overlay, then the full summary at once). Raw OpenRouter SSE streams normally, so this is a LiteLLM-side hiccup, not a config error. `summaryComplete` carries the full text, so output is never lost.
-- Verify the model list with `curl -s https://openrouter.ai/api/v1/models` — model IDs change often.
-
-## Reasoning config (`build_params` in local-ai-handler.py)
-
-OpenRouter exposes **one** unified `reasoning` field and maps it onto whatever the upstream provider expects. So a model entry writes reasoning once, provider-agnostically:
-
-```json
-"reasoning": "high"                  // shorthand → {"effort": "high"}
-"reasoning": {"effort": "high"}      // OpenAI-style effort
-"reasoning": {"max_tokens": 10000}   // Anthropic-style thinking budget
-```
-
-`build_params()` passes this through as `extra_body={"reasoning": ...}` for any `openrouter/`-prefixed model. The legacy `reasoning_effort` / `thinking` provider-sniffing path is retained **only** for direct `openai/...` / `anthropic/...` entries, should one ever be added back. There is no longer a `thinking` key in ai-config.json.
-
-## Model picker (`models[]` + `alternateModels[]`)
-
-`ai-config.json` has two model arrays, both selectable from the single in-panel picker:
-
-- **`models[]`** — primary picks; `models[0]` is the default ("best") pick used when nothing is remembered.
-- **`alternateModels[]`** — additional picker options (no separate UI of their own).
-
-Ids must be unique across both arrays (`loadAIConfig` enforces this). Alternates define **no `prompt`**, so they inherit the current prompt — switching model is a pure model swap, same instructions.
-
-There is **one active model at a time**. Choosing a different model in the picker (a) persists `pref:defaultModel` (the remembered default for future summaries), and (b) if the page already has a summary, sends `regenerate {modelId, prompt}` — the background rebuilds the job's conversation on the new model and streams it back into the same panel. Each job's per-model slot carries `usedModel` ({id, name, icon}) so the caption, "Generating with …" placeholder, and history entry name the model that actually wrote the content. Follow-ups continue with the active model.
+- **Button spins forever.** Usually an orphaned content script: reloading the extension leaves old content scripts running but disconnected (`chrome.runtime.id` is `undefined`, `sendMessage` throws "Extension context invalidated"). **Fix: reload the page.** `sendToBackground()` / `ytSend()` detect this and show a "refresh this page" banner.
+- **Stuck on "Generating with <model>…".** Check `wrangler tail` (API-token env, see Deploying). A model id the deployed Worker doesn't know falls back to `MODELS[0]`, so after a config change, deploy.
+- If reloading the page doesn't help, check the service worker console (`chrome://extensions` → the extension → "service worker"). If `loadAIConfig()` throws, `configLoaded` stays `false` and every message queues in `pendingRequests` forever.
+- "Worker endpoint/token not configured" → set them in the extension's options page.
+- Transcript problems: `tail -f /tmp/native-host-test.txt` (yt-summary.py).
 
 ## Testing
 
-⚠️ The Jest suite (`tests/*.test.js`) is **stale** — it targets the pre-rewrite architecture (Hetzner `/summarize` + `/draft` HTTP API, fixed fast/deep tabs, hex-vs-`rgb()` assertions) and largely fails against the current native-messaging + job-store code. It needs a from-scratch rewrite. **Verification is done live in the browser via CDP** (agent-browser driving Arc — see below), not this suite.
+⚠️ The Jest suite (`tests/*.test.js`) is **stale** — it targets an older architecture and mostly fails. **Verify live in the browser via CDP** instead.
+
+### Smoke-testing the Worker (preferred for backend/model changes)
+No browser needed. `APP_TOKEN` is in `worker/.dev.vars`:
+```bash
+T=...; B=https://summarizer.goldenoreo.workers.dev; U=https://example.com/smoke-test
+curl -s -X POST -H "Authorization: Bearer $T" -H 'Content-Type: application/json' $B/api/summarize \
+  -d "{\"url\":\"$U\",\"text\":\"...\",\"modelId\":\"<id>\",\"noPoster\":true}"
+curl -sN --max-time 120 -H "Authorization: Bearer $T" "$B/api/job/$(python3 -c "import urllib.parse;print(urllib.parse.quote('$U',safe=''))")/stream"
+```
+The SSE stream stays open after completion; look for `usedModel` + `durationMs`. Delete the test entry afterwards: `DELETE /api/summaries/<encoded url>`.
 
 ### Live-testing this extension over CDP
-- The extension is loaded **unpacked in Arc** (Chromium) — ID `fbmgekimgmgiiffchlkfknehmgmiphaf` is path-derived from `/Users/tj/summarizer-chrome-plugin` (no `key` in manifest), which is why the native-host `allowed_origins` match. Native-host manifests live in Google **Chrome**'s `NativeMessagingHosts/` dir but Arc uses them.
-- Arc exposes CDP on port 9222 (`~/bin/arc-cdp`). Drive with `agent-browser --cdp 9222 ...`.
-- **Reload the extension after editing `background.js`/`manifest.json`**: open `chrome-extension://<id>/options.html`, then `eval "chrome.runtime.reload()"`. (Python native-host edits need no reload — the host is spawned fresh per message.)
-- Trigger a summary from page context by selecting text and `.click()`-ing `#fab-container button[title="Summarize selection"]`; inspect state via `chrome.storage.local.get(null)` from the options page.
+- ⚠️ This is Tj's **real** Arc browser, in use while you test, so the active tab changes under you and `eval`/`screenshot` can hit the wrong tab. Pin a tab with `tab <id>` right before each check, never `open` in a tab Tj is using, and prefer the curl smoke test for anything that doesn't need the UI.
+- Loaded **unpacked in Arc** — ID `fbmgekimgmgiiffchlkfknehmgmiphaf` (path-derived from `/Users/tj/summarizer-chrome-plugin`; no `key` in manifest, which is why the native-host `allowed_origins` match).
+- Arc exposes CDP on port 9222 (`~/bin/arc-cdp`). Drive with `agent-browser --cdp 9222 ...`. Arc has many tabs open; `agent-browser tab list` / `tab <id>` before screenshots, or you'll capture the wrong one.
+- **Reload after editing `background.js`, `content-dual.js`, `ai-config.json` or `manifest.json`:** open `chrome-extension://<id>/options.html`, then `eval "chrome.runtime.reload()"`, then reload the test page.
+- Trigger a summary: select text, then `.click()` `#fab-container button[title^="Quick"]` (⚡, no poster) or `[title^="Summarize"]` (✨). Inspect state via `chrome.storage.local.get(null)` from the options page.
 
-## "Open in Claude Code" Config (`openInClaudeCode`)
+## Chat with transcript (💬 player button)
 
-The 🖥️ "Open in Claude Code" path (`handle_open_in_cc` in `local-ai-handler.py`) is configured by the `openInClaudeCode` block in `ai-config.json` — separate from the dual-mode `models[]`/`defaultPrompt` keys, because it opens an interactive Claude Code session rather than streaming a fixed summary:
+Opens the panel with the video's transcript as context and **generates nothing** until you ask. `chatVideo` → same transcript fetch as `summarizeVideo` → `startChat()` POSTs `/api/summarize` with `chat: true`; the Worker's `SummaryJob.start` seeds the conversation (`CHAT_PROMPT` + transcript as one system turn) and skips `run()`. The first question goes through the normal `followup` route. Jobs carry `mode: 'summary' | 'chat'`; "Summarize instead" calls `regenerate`, which flips the job back to `summary`. In chat mode the picker never regenerates — `followup {modelId}` moves the thread to the new model (Worker copies the messages).
 
-```json
-"openInClaudeCode": {
-  "model": "claude-opus-4-8",
-  "reasoning": "max",
-  "systemPrompt": "You are a transcript summarizer",
-  "prompt": "Read the transcript at {ref}, summarize it and extract the key insights."
-}
-```
+SSE `snapshot`/`complete` carry only the **current turn** (`gen.turnStart`); `gen.content` in D1 still accumulates every turn for the dashboard.
 
-- **`prompt`** — instruction sent to the session; `{ref}` is replaced with the transcript file path (substituted via `.replace`, so other braces are left untouched).
-- **`systemPrompt`** — `--append-system-prompt` on the Ghostty/`claude` CLI fallback (shell-escaped with `shlex.quote`).
-- **`model`** / **`reasoning`** — used by both the Superconductor terminal-tab path (`sc layout run`) and the in-app chat fallback (`sc chat new`).
+## Icons
 
-The Python host reads this block **fresh from disk on every click** (`open_in_cc_config()`), so edits take effect on the next "Open in Claude Code" with no native-host restart or extension reload. Missing keys / unreadable / invalid JSON fall back to `OPEN_IN_CC_DEFAULTS` (the prior hardcoded values), logging the reason to `/tmp/local-ai-handler.log`.
+Buttons use Lucide line icons from `icons.js` (`self.CS_ICONS`, loaded in both content-script entries, so it's guarded against running twice). Player/tile buttons are "glass mono" (translucent dark circle, white icon, teal on hover). Model icons in the picker/history go through `iconHTML()` (brand logos); chat jobs show 💬 in history.
+

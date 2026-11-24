@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>How your wiki gets built, and which AI does each job</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Geist', system-ui, sans-serif; background: #f5f5f5; color: #2d3142; min-height: 100vh;
+           display: flex; align-items: center; justify-content: center; padding: 3rem 2rem; }
+    .frame { max-width: 1200px; width: 100%; }
+    .diagram-container { width: 100%; overflow-x: auto; }
+    .eyebrow { font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.66rem; font-weight: 500; letter-spacing: 0.18em;
+               text-transform: uppercase; color: #4f5d75; margin-bottom: 0.5rem; }
+    h1 { font-family: 'Instrument Serif', serif; font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem); font-weight: 400;
+         letter-spacing: -0.02em; line-height: 1.15; margin-bottom: 1.5rem; }
+    svg { width: 100%; min-width: 840px; display: block; }
+    @media print { .diagram-container { overflow-x: visible; } svg { min-width: 0; } }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Architecture · summarizer wiki</p>
+    <h1>How your wiki gets built, and which AI does each job</h1>
+    <div class="diagram-container">
+      <svg viewBox="0 0 840 1010" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="wiki-structure-title wiki-structure-desc">
+        <title id="wiki-structure-title">How your wiki gets built, and which AI does each job</title>
+        <desc id="wiki-structure-desc">Summaries become notes, a librarian designs the topics, writers turn notes into wiki pages, and you read, chat and approve weekly suggestions.</desc>
+        <defs>
+          <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+          <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bf4520"/></marker>
+          <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+        </defs>
+        <rect y="0" width="100%" height="100%" fill="#f5f5f5"/>
+<path d="M 400.0 220 L 400.0 270" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 400.0 350 L 400.0 400" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 400.0 480 L 400.0 530" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 400.0 610 L 400.0 660" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 500 440.0 L 600 440.0" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 700.0 480 L 700.0 562.0 Q 700.0 570.0 692.0 570.0 L 500 570.0" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 600 700.0 L 500 700.0" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 400.0 740 L 400.0 810" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 500 850.0 L 600 850.0" fill="none" stroke="#bf4520" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+<rect x="408.0" y="239.0" width="77" height="12" rx="2" fill="#f5f5f5"/><text x="446.5" y="248.0" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">EACH NEW ONE</text>
+<rect x="408.0" y="369.0" width="38" height="12" rx="2" fill="#f5f5f5"/><text x="427.0" y="378.0" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">SAVES</text>
+<rect x="408.0" y="499.0" width="38" height="12" rx="2" fill="#f5f5f5"/><text x="427.0" y="508.0" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">FEEDS</text>
+<rect x="408.0" y="629.0" width="44" height="12" rx="2" fill="#f5f5f5"/><text x="430.0" y="638.0" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">WRITES</text>
+<rect x="534.0" y="420.0" width="32" height="12" rx="2" fill="#f5f5f5"/><text x="550.0" y="429.0" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">ONCE</text>
+<rect x="567.0" y="550.0" width="66" height="12" rx="2" fill="#f5f5f5"/><text x="600.0" y="559.0" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">TOPIC LIST</text>
+<rect x="522.5" y="680.0" width="55" height="12" rx="2" fill="#f5f5f5"/><text x="550.0" y="689.0" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">SEARCHES</text>
+<rect x="408.0" y="769.0" width="49" height="12" rx="2" fill="#f5f5f5"/><text x="432.5" y="778.0" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">SUNDAYS</text>
+<rect x="522.5" y="830.0" width="55" height="12" rx="2" fill="#f5f5f5"/><text x="550.0" y="839.0" fill="#bf4520" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">SUGGESTS</text>
+<rect x="300" y="140" width="200" height="80" rx="6" fill="#f5f5f5"/>
+<rect x="300" y="140" width="200" height="80" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<text x="400.0" y="177.0" fill="#2d3142" font-size="13" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Your summaries</text>
+<text x="400.0" y="192.0" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">1,084 videos + pages</text>
+<rect x="300" y="270" width="200" height="80" rx="6" fill="#f5f5f5"/>
+<rect x="300" y="270" width="200" height="80" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="308" y="276" width="57" height="12" rx="2" fill="transparent" stroke="#2d3142" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="336.5" y="285" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">HAIKU 5.5</text>
+<text x="400.0" y="313.0" fill="#2d3142" font-size="13" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Note-taker</text>
+<text x="400.0" y="328.0" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">points, people, topics</text>
+<rect x="300" y="400" width="200" height="80" rx="6" fill="#f5f5f5"/>
+<rect x="300" y="400" width="200" height="80" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+<text x="400.0" y="437.0" fill="#2d3142" font-size="13" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Notes</text>
+<text x="400.0" y="452.0" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">30,600 claims</text>
+<rect x="600" y="400" width="200" height="80" rx="6" fill="#f5f5f5"/>
+<rect x="600" y="400" width="200" height="80" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="608" y="406" width="52" height="12" rx="2" fill="transparent" stroke="#2d3142" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="634.0" y="415" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">OPUS 5.5</text>
+<text x="700.0" y="443.0" fill="#2d3142" font-size="13" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Librarian</text>
+<text x="700.0" y="458.0" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">designs 128 topics</text>
+<rect x="300" y="530" width="200" height="80" rx="6" fill="#f5f5f5"/>
+<rect x="300" y="530" width="200" height="80" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="308" y="536" width="82" height="12" rx="2" fill="transparent" stroke="#2d3142" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="349.0" y="545" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">SONNET / HAIKU</text>
+<text x="400.0" y="573.0" fill="#2d3142" font-size="13" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Page writers</text>
+<text x="400.0" y="588.0" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">one per page</text>
+<rect x="300" y="660" width="200" height="80" rx="6" fill="#f5f5f5"/>
+<rect x="300" y="660" width="200" height="80" rx="6" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1"/>
+<text x="400.0" y="697.0" fill="#2d3142" font-size="13" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Wiki pages</text>
+<text x="400.0" y="712.0" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">1,029 pages at /wiki</text>
+<rect x="600" y="660" width="200" height="80" rx="6" fill="#f5f5f5"/>
+<rect x="600" y="660" width="200" height="80" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="608" y="666" width="62" height="12" rx="2" fill="transparent" stroke="#2d3142" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="639.0" y="675" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">SONNET 5.5</text>
+<text x="700.0" y="703.0" fill="#2d3142" font-size="13" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Chat</text>
+<text x="700.0" y="718.0" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">answers with sources</text>
+<rect x="300" y="810" width="200" height="80" rx="6" fill="#f5f5f5"/>
+<rect x="300" y="810" width="200" height="80" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="308" y="816" width="82" height="12" rx="2" fill="transparent" stroke="#2d3142" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="349.0" y="825" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">SONNET / HAIKU</text>
+<text x="400.0" y="853.0" fill="#2d3142" font-size="13" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Weekly checkers</text>
+<text x="400.0" y="868.0" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">merges, clashes, gaps</text>
+<rect x="600" y="810" width="200" height="80" rx="6" fill="#f5f5f5"/>
+<rect x="600" y="810" width="200" height="80" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<text x="700.0" y="847.0" fill="#2d3142" font-size="13" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Review queue</text>
+<text x="700.0" y="862.0" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">you approve or reject</text>
+<text x="40" y="940" fill="#4f5d75" font-size="15" font-style="italic" font-family="'Instrument Serif', serif">Writers use Sonnet 5.5 for pages with 12+ sources, Haiku 5.5 for smaller ones.</text>
+<text x="40" y="970" fill="#4f5d75" font-size="15" font-style="italic" font-family="'Instrument Serif', serif">Nothing in the review queue changes a page until you approve it.</text>
+      </svg>
+    </div>
+  </div>
+</body>
+</html>
