@@ -125,9 +125,9 @@ function createSummaryButton() {
   // 💬 opens the panel with the transcript loaded as context and generates nothing — you just
   // talk to the video. Same transcript fetch; the background starts a chat job instead.
   const summarizeBtn = makeButton('yt-summarize-btn', CS_ICONS.sparkles);
-  summarizeBtn.title = 'Summarize + infographic (cloud)';
+  summarizeBtn.title = 'Infographic summary';
   const quickBtn = makeButton('yt-quick-btn', CS_ICONS.zap);
-  quickBtn.title = 'Quick summary — no infographic';
+  quickBtn.title = 'Text summary (no infographic)';
   const chatBtn = makeButton('yt-chat-btn', CS_ICONS.chat);
   chatBtn.title = 'Chat with the transcript — no summary';
 
