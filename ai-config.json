@@ -4,9 +4,6 @@
       "id": "opus-5-5",
       "name": "Opus 5.5",
       "icon": "claude",
-      "litellm_model": "openrouter/anthropic/claude-opus-5.5",
-      "reasoning": {"effort": "high"},
-      "max_tokens": 16000,
       "prompt": "Summarize concisely and extract key insights. Start with a TLDR. Use markdown:\n\n"
     }
   ],
@@ -14,48 +11,28 @@
     {
       "id": "fable",
       "name": "Fable 5.1",
-      "icon": "claude",
-      "litellm_model": "openrouter/anthropic/claude-fable-5.1",
-      "reasoning": {"effort": "high"},
-      "max_tokens": 16000
+      "icon": "claude"
     },
     {
       "id": "opus",
       "name": "Opus 4.8",
-      "icon": "claude",
-      "litellm_model": "openrouter/anthropic/claude-opus-4.8",
-      "reasoning": {"effort": "high"},
-      "max_tokens": 16000
+      "icon": "claude"
     },
     {
       "id": "gpt",
       "name": "GPT-5.6 Sol",
-      "icon": "openai",
-      "litellm_model": "openrouter/openai/gpt-5.6-sol",
-      "reasoning": {"effort": "high"},
-      "max_tokens": 8000
+      "icon": "openai"
     },
     {
       "id": "sonnet",
       "name": "Sonnet 5",
-      "icon": "claude",
-      "litellm_model": "openrouter/anthropic/claude-sonnet-5",
-      "max_tokens": 8000
+      "icon": "claude"
     },
     {
       "id": "gpt-pro",
       "name": "GPT-5.6 Sol Pro",
-      "icon": "openai",
-      "litellm_model": "openrouter/openai/gpt-5.6-sol-pro",
-      "reasoning": {"effort": "high"},
-      "max_tokens": 8000
+      "icon": "openai"
     }
   ],
-  "defaultPrompt": "Summarize concisely. Start with TLDR, then a tweetable one-liner. Be direct. No contrastive framing—don't define things by what they aren't. Use markdown:\n\n",
-  "openInClaudeCode": {
-    "model": "claude-fable-5-1",
-    "reasoning": "max",
-    "systemPrompt": "You are a transcript summarizer",
-    "prompt": "Read the transcript at {ref}, summarize it and extract the key insights, then /explain-viz. Save the final graphic image to {out} so it can be linked back to the source video."
-  }
+  "defaultPrompt": "Summarize concisely. Start with TLDR, then a tweetable one-liner. Be direct. No contrastive framing—don't define things by what they aren't. Use markdown:\n\n"
 }

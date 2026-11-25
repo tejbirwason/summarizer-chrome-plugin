@@ -5,14 +5,6 @@
 // page), a summary keeps generating and gets persisted even after you navigate away from the
 // tab that started it — and any page can rehydrate its panel by asking for the job state.
 
-// Try to load config.js (Claude API key etc. — no longer required now that drafts are gone,
-// but importScripts is kept so an existing config.js doesn't break anything).
-try {
-  importScripts('config.js');
-} catch (e) {
-  console.warn('config.js not found. Using default values.');
-}
-
 // ===========================================================================================
 // Cloud Worker. Summarization, poster generation and durable storage all live in a Cloudflare
 // Worker + Durable Object now, so no native-messaging host is required to run this extension.
@@ -61,11 +53,8 @@ async function loadAIConfig() {
     // alternateModels render no tab of their own; they are only selectable targets for the
     // model picker / "Regenerate with...". Validate them identically so a typo fails at load.
     for (const model of [...aiConfig.models, ...(aiConfig.alternateModels || [])]) {
-      if (!model.id || !model.litellm_model) {
-        throw new Error(`Model missing required fields: ${JSON.stringify(model)}`);
-      }
-      if (!model.litellm_model.includes('/')) {
-        throw new Error(`Invalid litellm_model format "${model.litellm_model}" - must be "provider/model-name"`);
+      if (!model.id || !model.name) {
+        throw new Error(`Model missing required fields (id, name): ${JSON.stringify(model)}`);
       }
     }
 

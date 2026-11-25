@@ -11,7 +11,7 @@ Chrome extension that summarizes any page selection or YouTube video. Summaries 
 - **Reading panel** (content-dual.js): dark neutral palette (teal/amber, no blue), model picker with a remembered default (`pref:defaultModel`), in-panel prompt editor (`pref:defaultPrompt`), history view, "Summary ready" reopen pill, inline poster.
 - **Two FABs on a selection:** ✨ summary + infographic, ⚡ quick summary (no infographic).
 - **Dashboard** (`worker/public/index.html`): poster gallery, summary detail, per-summary chat drawer (Cloudflare Agents SDK, `SummaryChat` DO).
-- The old native-messaging summarizer (`local-ai-handler.py` + `com.localai.json`) and the 🖥️ "Open in Claude Code" flow are **dead**. background.js no longer calls them. Only `yt-summary.py` is still used (transcripts).
+- Only `yt-summary.py` (`com.ytsummary.json`) remains as an optional native host (YouTube transcripts). The old local AI native host and "Open in Claude Code" flow have been removed.
 
 ## Key Commands
 
@@ -88,7 +88,7 @@ An agent-maintained wiki compiled from every summarized source. Design + mockups
 **Two files, keep them in sync:**
 
 - `worker/src/config.ts` — **what runs.** `MODELS[0]` is the default. The Worker falls back to `MODELS[0]` for an unknown model id, so a model added only to the extension silently runs the old default. **Changes need a Worker deploy.**
-- `ai-config.json` — what the extension's picker shows (ids, names, icons). Changes need an extension reload. Its `litellm_model` / `openInClaudeCode` fields are leftovers from the native host and unused.
+- `ai-config.json` — what the extension's picker shows (`id`, `name`, `icon`, `prompt`, `defaultPrompt`). Changes need an extension reload.
 
 Both have `models[]` (primary; `[0]` is the default) and `alternateModels[]`. Ids must be unique across both. Alternates define no `prompt`, so they use the current prompt.
 
@@ -126,7 +126,6 @@ Current Claude models (Opus 4.8+, Fable 5.1, Sonnet 5) use adaptive thinking ste
 
 - Secrets live in the Worker (`wrangler secret put`), not the extension. The extension holds only the `APP_TOKEN` (options page).
 - Rendered markdown is sanitized with DOMPurify; untrusted data goes in via `textContent` or `escapeHtml()`.
-- `background.js` still `importScripts('config.js')` defensively; the file is no longer needed.
 
 ## Debugging
 
@@ -138,7 +137,7 @@ Current Claude models (Opus 4.8+, Fable 5.1, Sonnet 5) use adaptive thinking ste
 
 ## Testing
 
-⚠️ The Jest suite (`tests/*.test.js`) is **stale** — it targets an older architecture and mostly fails. **Verify live in the browser via CDP** instead.
+Verify live via curl smoke tests (below) or in the browser via CDP.
 
 ### Smoke-testing the Worker (preferred for backend/model changes)
 No browser needed. `APP_TOKEN` is in `worker/.dev.vars`:

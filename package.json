@@ -4,17 +4,13 @@
   "description": "",
   "main": "background.js",
   "scripts": {
-    "test": "jest",
-    "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage",
     "e2e": "npx playwright test",
     "e2e:load": "npx playwright test extension-loads",
     "e2e:fab": "npx playwright test fab-buttons",
     "e2e:summarize": "npx playwright test summarize-flow",
     "e2e:youtube": "npx playwright test youtube-button",
-    "test:all": "npm test && npm run e2e",
     "dev": "node scripts/launch-dev.js",
-    "dev:test": "node scripts/launch-dev.js file://$(pwd)/tests/test-page.html",
+    "dev:test": "node scripts/launch-dev.js file://$(pwd)/e2e/test-page.html",
     "dev:youtube": "node scripts/launch-dev.js https://youtube.com/watch?v=dQw4w9WgXcQ"
   },
   "repository": {
@@ -32,8 +28,6 @@
   "devDependencies": {
     "@playwright/test": "^1.58.2",
     "@types/chrome": "^0.0.326",
-    "jest": "^30.0.0",
-    "jest-environment-jsdom": "^30.0.0",
     "node-fetch": "^2.7.0",
     "puppeteer": "^24.26.1"
   }

@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# One-shot setup for the Summarizer Chrome extension's native messaging hosts.
+# Optional setup for the Summarizer Chrome extension's YouTube transcript native host.
+# Without it, the extension falls back to scraping YouTube's in-page transcript panel.
 #
 # Usage: scripts/install.sh <CHROME_EXTENSION_ID>
 #
 # What it does:
-#   1. Installs Python deps from requirements.txt
-#   2. Makes the two Python native hosts executable
-#   3. Renders com.localai.json / com.ytsummary.json with your repo path
-#      and extension ID, and drops them into Chrome's NativeMessagingHosts dir
-#   4. Reminds you to fully quit + relaunch Chrome
+#   1. Installs Python deps for yt-summary.py from requirements.txt
+#   2. Makes yt-summary.py executable
+#   3. Renders com.ytsummary.json with your repo path and extension ID,
+#      and writes it into Chrome's NativeMessagingHosts dir
 
 set -euo pipefail
 
@@ -39,25 +39,22 @@ echo "==> Installing Python dependencies"
 pip3 install -r "$REPO_PATH/requirements.txt"
 
 echo ""
-echo "==> Making Python hosts executable"
-chmod +x "$REPO_PATH/local-ai-handler.py" "$REPO_PATH/yt-summary.py"
+echo "==> Making yt-summary.py executable"
+chmod +x "$REPO_PATH/yt-summary.py"
 
 echo ""
-echo "==> Rendering manifests with your repo path and extension ID"
+echo "==> Rendering com.ytsummary.json with your repo path and extension ID"
 mkdir -p "$NMH_DIR"
-for tpl in com.localai.json com.ytsummary.json; do
-  sed \
-    -e "s|__REPO_PATH__|$REPO_PATH|g" \
-    -e "s|__EXTENSION_ID__|$EXT_ID|g" \
-    "$REPO_PATH/$tpl" > "$NMH_DIR/$tpl"
-  echo "  wrote $NMH_DIR/$tpl"
-done
+sed \
+  -e "s|__REPO_PATH__|$REPO_PATH|g" \
+  -e "s|__EXTENSION_ID__|$EXT_ID|g" \
+  "$REPO_PATH/com.ytsummary.json" > "$NMH_DIR/com.ytsummary.json"
+echo "  wrote $NMH_DIR/com.ytsummary.json"
 
 echo ""
 echo "==> Done."
 echo ""
 echo "Next:"
 echo "  1. Fully quit Chrome (cmd+Q), not just close the window."
-echo "  2. Relaunch Chrome and try the extension."
-echo "  3. If something breaks, tail the logs:"
-echo "       tail -f /tmp/local-ai-handler.log /tmp/native-host-test.txt"
+echo "  2. Relaunch Chrome and try summarizing a YouTube video."
+echo "  3. Logs: tail -f /tmp/native-host-test.txt"

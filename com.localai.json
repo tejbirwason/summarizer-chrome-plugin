@@ -1,7 +1,0 @@
-{
-  "name": "com.localai",
-  "description": "Local AI Handler for Text Summarization",
-  "path": "__REPO_PATH__/local-ai-handler.py",
-  "type": "stdio",
-  "allowed_origins": ["chrome-extension://__EXTENSION_ID__/"]
-}

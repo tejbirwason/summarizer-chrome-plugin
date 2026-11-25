@@ -38,7 +38,7 @@ const test = pw.test.extend({
   // Test page served from local file
   testPage: async ({ context }, use) => {
     const page = await context.newPage();
-    const testPagePath = path.join(EXTENSION_PATH, 'tests', 'test-page.html');
+    const testPagePath = path.join(EXTENSION_PATH, 'e2e', 'test-page.html');
     await page.goto(`file://${testPagePath}`);
     // Wait for both the test page and content script to be ready
     await page.waitForFunction(() => window.testPageReady === true);
