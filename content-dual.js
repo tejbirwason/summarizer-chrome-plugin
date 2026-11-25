@@ -54,11 +54,11 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
   function extensionAlive() {
     try { return Boolean(chrome.runtime && chrome.runtime.id); } catch (e) { return false; }
   }
-  function showStaleBanner() {
+  function showStaleBanner(text) {
     if (document.getElementById('claude-stale-banner')) return;
     const banner = document.createElement('div');
     banner.id = 'claude-stale-banner';
-    banner.textContent = '⚠️ Extension was reloaded — refresh this page to use the summarizer.';
+    banner.textContent = text || '⚠️ Extension was reloaded — refresh this page to use the summarizer.';
     banner.style.cssText = `position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 2147483000;
       background: #4a2c2c; color: #ffd7d7; border: 1px solid #a33; border-radius: 8px; padding: 10px 16px;
       font-size: 13px; font-family: ${'system-ui, -apple-system, sans-serif'}; box-shadow: 0 2px 10px rgba(0,0,0,0.4); cursor: pointer;`;
@@ -1464,7 +1464,17 @@ if (typeof window.claudeSummarizerInitialized === 'undefined') {
   // Message listener — reacts to the background's job broadcasts for THIS url.
   // ===========================================================================
   chrome.runtime.onMessage.addListener((request) => {
-    if (request.action === 'configError') { console.error('AI Config Error:', request.error); return; }
+    if (request.action === 'configError') {
+      // Background can't run anything. Stop every spinner on the page (selection FABs and the
+      // YouTube player/tile buttons) and say why, instead of leaving them rotating forever.
+      console.error('AI Config Error:', request.error);
+      document.querySelectorAll('.fab, #yt-btn-container button, .yt-sum-tile-btn')
+        .forEach(b => { if (b.setLoading) b.setLoading(false); });
+      const m = S.activeModelId && S.models?.[S.activeModelId];
+      if (m && m.inProgress) { m.inProgress = false; m.streaming = ''; m.phase = null; m.error = request.error; render(); }
+      showStaleBanner(`⚠️ ${request.error}`);
+      return;
+    }
 
     // Keep S.url aligned with the live tab BEFORE any url guard. Critical on YouTube SPA nav.
     syncPageIdentity();

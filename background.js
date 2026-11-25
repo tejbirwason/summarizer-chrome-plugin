@@ -38,6 +38,13 @@ async function api(path, opts = {}) {
 let aiConfig = null;
 let configLoaded = false;
 let pendingRequests = [];
+let configLoadError = null;
+
+function failForConfig({ sender, sendResponse }) {
+  const error = `Extension config failed to load: ${configLoadError}. Reload the extension.`;
+  try { sendResponse({ ok: false, error }); } catch (_) {}
+  safeSend(sender?.tab, { action: 'configError', error });
+}
 
 // Load AI config at startup
 async function loadAIConfig() {
@@ -74,6 +81,12 @@ async function loadAIConfig() {
 
   } catch (error) {
     console.error('Failed to load ai-config.json:', error);
+    // Fail loudly instead of queueing forever: queued and later requests get an error back,
+    // so buttons stop spinning and the page says why. (Seen when the extension wasn't reloaded
+    // after ai-config.json changed shape: old validation + new config = silent infinite spin.)
+    configLoadError = error.message;
+    pendingRequests.forEach(failForConfig);
+    pendingRequests = [];
     chrome.tabs.query({}, (tabs) => {
       tabs.forEach(tab => {
         chrome.tabs.sendMessage(tab.id, {
@@ -911,6 +924,10 @@ function handleRequest(request, sender, sendResponse) {
 }
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (configLoadError) {
+    failForConfig({ sender, sendResponse });
+    return false;
+  }
   if (!configLoaded) {
     // Queue until config loads, then replay.
     pendingRequests.push({ request, sender, sendResponse });
